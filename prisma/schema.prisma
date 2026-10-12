@@ -23,16 +23,25 @@ enum ReservationStatus {
   CANCELLED
 }
 
+
 model User {
-  id           String        @id @default(cuid())
-  name         String
-  email        String        @unique
-  passwordHash String?
-  role         UserRole      @default(MEMBER)
-  reservations Reservation[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                    String        @id @default(cuid())
+  name                  String
+  email                 String        @unique
+  passwordHash          String?
+  role                  UserRole      @default(MEMBER)
+  isActive              Boolean       @default(true)
+  mustChangePassword    Boolean       @default(true)
+  failedLoginAttempts   Int           @default(0)
+  lockedUntil           DateTime?
+  passwordResetOtpHash  String?
+  passwordResetOtpExpiry DateTime?
+  passwordResetAttempts Int           @default(0)
+  reservations          Reservation[]
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
 }
+
 
 model Resource {
   id           String        @id @default(cuid())
