@@ -2,11 +2,21 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { getSessionUser } from "@/lib/auth";
+import { requireAuth } from "@/lib/require-auth";
+
 
 export async function POST(request: Request) {
   try {
-    const sessionUser = await getSessionUser();
+   const auth = await requireAuth({ allowPasswordChange: true });
+
+if (!auth.ok) {
+  return NextResponse.json(
+    { message: auth.message },
+    { status: auth.status }
+  );
+}
+
+const sessionUser = auth.user;
 
     if (!sessionUser) {
       return NextResponse.json(
