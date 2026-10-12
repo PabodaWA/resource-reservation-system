@@ -198,33 +198,59 @@ export default function Home() {
         </aside>
 
         <main id="dashboard" className="min-w-0 flex-1">
-          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
+          
+            <header className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 font-bold text-white md:hidden">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 font-bold text-white md:hidden">
                 R
-              </div>
-              <div>
+                </div>
+
+                <div>
                 <p className="text-sm text-slate-500">
-                  Workspace / Overview
+                    Workspace / Overview
                 </p>
                 <h2 className="mt-1 text-xl font-bold sm:text-2xl">
-                  Dashboard
+                    Dashboard
                 </h2>
-              </div>
+                </div>
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden text-right sm:block">
+                <div className="hidden text-right sm:block">
                 <p className="text-sm font-semibold">Resource Manager</p>
                 <p className="text-xs text-slate-500">
-                  Management workspace
+                    Management workspace
                 </p>
-              </div>
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">
+                </div>
+
+                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-indigo-100 font-bold text-indigo-700">
                 RM
-              </div>
+                </div>
+
+                <button
+                type="button"
+                onClick={async () => {
+                    try {
+                    const response = await fetch("/api/auth/logout", {
+                        method: "POST",
+                    });
+
+                    if (!response.ok) {
+                        throw new Error("Logout failed");
+                    }
+
+                    window.location.href = "/login";
+                    } catch {
+                    window.alert("Unable to log out. Please try again.");
+                    }
+                }}
+                className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                >
+                Log out
+                </button>
             </div>
-          </header>
+            </header>
+
 
           <div className="mx-auto max-w-7xl space-y-8 p-5 sm:p-8">
             <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-700 to-violet-600 p-6 text-white shadow-sm sm:p-9">
