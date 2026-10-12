@@ -4,6 +4,16 @@ import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { createSession } from "@/lib/auth";
 
+const MAX_FAILED_ATTEMPTS = 3;
+const LOCK_DURATION_MS = 15 * 60 * 1000;
+
+function invalidCredentials() {
+  return NextResponse.json(
+    { message: "Invalid email or password." },
+    { status: 401 }
+  );
+}
+
 export async function POST(request: Request) {
   try {
     const body: unknown = await request.json();
@@ -26,10 +36,7 @@ export async function POST(request: Request) {
     const password = body.password;
 
     if (!email || !password || email.length > 254 || password.length > 128) {
-      return NextResponse.json(
-        { message: "Invalid email or password." },
-        { status: 400 }
-      );
+      return invalidCredentials();
     }
 
     const user = await prisma.user.findUnique({
@@ -37,10 +44,33 @@ export async function POST(request: Request) {
     });
 
     if (!user || !user.passwordHash) {
+      return invalidCredentials();
+    }
+
+    if (!user.isActive) {
+      return invalidCredentials();
+    }
+
+    const now = new Date();
+
+    if (user.lockedUntil && user.lockedUntil > now) {
       return NextResponse.json(
-        { message: "Invalid email or password." },
-        { status: 401 }
+        {
+          message: "Account temporarily locked. Please try again later.",
+        },
+        { status: 423 }
       );
+    }
+
+    // Clear an expired lock before checking the password.
+    if (user.lockedUntil && user.lockedUntil <= now) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: 0,
+          lockedUntil: null,
+        },
+      });
     }
 
     const passwordMatches = await bcrypt.compare(
@@ -49,11 +79,42 @@ export async function POST(request: Request) {
     );
 
     if (!passwordMatches) {
-      return NextResponse.json(
-        { message: "Invalid email or password." },
-        { status: 401 }
-      );
+      const nextAttempts = user.lockedUntil
+        ? 1
+        : user.failedLoginAttempts + 1;
+
+      const shouldLock = nextAttempts >= MAX_FAILED_ATTEMPTS;
+
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: shouldLock ? 0 : nextAttempts,
+          lockedUntil: shouldLock
+            ? new Date(Date.now() + LOCK_DURATION_MS)
+            : null,
+        },
+      });
+
+      if (shouldLock) {
+        return NextResponse.json(
+          {
+            message:
+              "Too many failed attempts. Account locked for 15 minutes.",
+          },
+          { status: 423 }
+        );
+      }
+
+      return invalidCredentials();
     }
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: 0,
+        lockedUntil: null,
+      },
+    });
 
     await createSession({
       id: user.id,
@@ -63,6 +124,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       message: "Login successful.",
+      requiresPasswordChange: user.mustChangePassword,
       user: {
         id: user.id,
         name: user.name,
