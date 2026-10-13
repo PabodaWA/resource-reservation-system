@@ -31,18 +31,11 @@ export default function LoginPage() {
         }),
       });
 
-      
-        const data: {
+      const data: {
         message?: string;
         requiresPasswordChange?: boolean;
-        user?: {
-            id: string;
-            name: string;
-            email: string;
-            role: "ADMIN" | "MEMBER";
-        };
-        } = await response.json();
-
+        user?: { role?: string };
+      } = await response.json();
 
       if (!response.ok) {
         setError(data.message ?? "Unable to sign in. Please try again.");
@@ -51,14 +44,10 @@ export default function LoginPage() {
 
       if (data.requiresPasswordChange) {
         router.replace("/change-password");
-         return;
-        }
+        return;
+      }
 
-    if (data.user?.role === "ADMIN") {
-         router.replace("/admin");
-        } else {
-         router.replace("/");
-        }
+      router.replace(data.user?.role === "ADMIN" ? "/admin" : "/");
       router.refresh();
     } catch {
       setError("Unable to connect to the server. Please try again.");

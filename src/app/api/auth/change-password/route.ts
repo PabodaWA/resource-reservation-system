@@ -103,6 +103,7 @@ const sessionUser = auth.user;
 
     return NextResponse.json({
       message: "Password changed successfully.",
+      role: sessionUser.role,
     });
   } catch (error) {
     console.error("Change password error:", error);

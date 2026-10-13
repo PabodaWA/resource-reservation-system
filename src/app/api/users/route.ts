@@ -1,20 +1,10 @@
-
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@/generated/prisma/client";
-import { isMailConfigured, sendTemporaryPasswordEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/require-auth";
 
-function loginUrl(request: Request): string {
-  const configured = process.env.APP_URL?.trim().replace(/\/$/, "");
-
-  if (configured && /^https?:\/\//i.test(configured)) {
-    return `${configured}/login`;
-  }
-
-  return `${new URL(request.url).origin}/login`;
-}
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: Request) {
   try {
@@ -34,62 +24,52 @@ export async function POST(request: Request) {
       body === null ||
       !("name" in body) ||
       !("email" in body) ||
+      !("password" in body) ||
+      !("role" in body) ||
       typeof body.name !== "string" ||
-      typeof body.email !== "string"
+      typeof body.email !== "string" ||
+      typeof body.password !== "string" ||
+      (body.role !== "ADMIN" && body.role !== "MEMBER")
     ) {
       return NextResponse.json(
-        { message: "Valid name and email are required." },
+        { message: "Name, email, temporary password, and role are required." },
         { status: 400 }
       );
     }
 
     const name = body.name.trim();
     const email = body.email.trim().toLowerCase();
+    const password = body.password;
 
-    if (
-      !name ||
-      name.length > 120 ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ||
-      email.length > 254
-    ) {
+    if (!name || name.length > 120) {
       return NextResponse.json(
-        { message: "Please provide a valid name and email." },
+        { message: "Name must be between 1 and 120 characters." },
         { status: 400 }
       );
     }
 
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-      select: { id: true },
-    });
-
-    if (existingUser) {
+    if (!EMAIL_PATTERN.test(email) || email.length > 254) {
       return NextResponse.json(
-        { message: "A user with this email already exists." },
-        { status: 409 }
+        { message: "Enter a valid email address." },
+        { status: 400 }
       );
     }
 
-    if (!isMailConfigured()) {
+    if (password.length < 12 || password.length > 128) {
       return NextResponse.json(
-        {
-          message:
-            "Email delivery is not configured, so the account was not created.",
-        },
-        { status: 503 }
+        { message: "Temporary password must contain 12–128 characters." },
+        { status: 400 }
       );
     }
 
-    // Generate a temporary password on the server.
-    const temporaryPassword = `${crypto.randomUUID()}Aa1!`;
-    const passwordHash = await bcrypt.hash(temporaryPassword, 12);
+    const passwordHash = await bcrypt.hash(password, 12);
 
     const user = await prisma.user.create({
       data: {
         name,
         email,
         passwordHash,
-        role: "MEMBER",
+        role: body.role,
         isActive: true,
         mustChangePassword: true,
       },
@@ -98,42 +78,13 @@ export async function POST(request: Request) {
         name: true,
         email: true,
         role: true,
-        isActive: true,
-        mustChangePassword: true,
-        createdAt: true,
       },
     });
-
-    try {
-      await sendTemporaryPasswordEmail({
-        to: user.email,
-        name: user.name,
-        temporaryPassword,
-        loginUrl: loginUrl(request),
-      });
-    } catch (mailError) {
-      console.error("Failed to email temporary password:", mailError);
-
-      await prisma.user.delete({ where: { id: user.id } }).catch((deleteError) => {
-        console.error(
-          "Failed to roll back user after email failure:",
-          deleteError
-        );
-      });
-
-      return NextResponse.json(
-        {
-          message:
-            "The temporary password email could not be sent, so the account was not created.",
-        },
-        { status: 502 }
-      );
-    }
 
     return NextResponse.json(
       {
         message:
-          "User created successfully. A temporary password was emailed to them.",
+          "User created. They must change this temporary password at first login.",
         user,
       },
       { status: 201 }
@@ -144,7 +95,7 @@ export async function POST(request: Request) {
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { message: "A user with this email already exists." },
+        { message: "An account with this email already exists." },
         { status: 409 }
       );
     }
@@ -152,7 +103,7 @@ export async function POST(request: Request) {
     console.error("Failed to create user:", error);
 
     return NextResponse.json(
-      { message: "Failed to create user." },
+      { message: "Failed to create the user." },
       { status: 500 }
     );
   }

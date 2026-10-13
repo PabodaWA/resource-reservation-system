@@ -10,7 +10,19 @@ export const metadata = {
   title: "Admin Dashboard | ReserveFlow",
 };
 
-async function AdminDashboardContent() {
+function timingOf(start: Date, end: Date, now: Date) {
+  if (end.getTime() <= now.getTime()) {
+    return "past" as const;
+  }
+
+  if (start.getTime() <= now.getTime()) {
+    return "in_progress" as const;
+  }
+
+  return "upcoming" as const;
+}
+
+async function ProtectedAdmin() {
   const sessionUser = await getSessionUser();
 
   if (!sessionUser) {
@@ -41,14 +53,9 @@ async function AdminDashboardContent() {
     redirect("/");
   }
 
-  const [
-    users,
-    resources,
-    reservations,
-    totalReservations,
-    confirmedReservations,
-    cancelledReservations,
-  ] = await Promise.all([
+  const now = new Date();
+
+  const [users, resources, reservations] = await Promise.all([
     prisma.user.findMany({
       orderBy: { createdAt: "desc" },
       select: {
@@ -58,7 +65,6 @@ async function AdminDashboardContent() {
         role: true,
         isActive: true,
         createdAt: true,
-        _count: { select: { reservations: true } },
       },
     }),
     prisma.resource.findMany({
@@ -72,12 +78,10 @@ async function AdminDashboardContent() {
         description: true,
         status: true,
         createdAt: true,
-        _count: { select: { reservations: true } },
       },
     }),
     prisma.reservation.findMany({
       orderBy: { startTime: "desc" },
-      take: 100,
       select: {
         id: true,
         title: true,
@@ -85,13 +89,22 @@ async function AdminDashboardContent() {
         startTime: true,
         endTime: true,
         status: true,
-        user: { select: { name: true, email: true } },
-        resource: { select: { name: true, location: true } },
+        resourceId: true,
+        user: {
+          select: {
+            name: true,
+            email: true,
+          },
+        },
+        resource: {
+          select: {
+            name: true,
+            type: true,
+            location: true,
+          },
+        },
       },
     }),
-    prisma.reservation.count(),
-    prisma.reservation.count({ where: { status: "CONFIRMED" } }),
-    prisma.reservation.count({ where: { status: "CANCELLED" } }),
   ]);
 
   const data: AdminDashboardData = {
@@ -100,21 +113,6 @@ async function AdminDashboardContent() {
       name: user.name,
       email: user.email,
     },
-    stats: {
-      totalUsers: users.length,
-      activeUsers: users.filter((item) => item.isActive).length,
-      adminUsers: users.filter((item) => item.role === "ADMIN").length,
-      totalResources: resources.length,
-      activeResources: resources.filter((item) => item.status === "ACTIVE")
-        .length,
-      totalCapacity: resources.reduce(
-        (total, item) => total + item.capacity,
-        0
-      ),
-      totalReservations,
-      confirmedReservations,
-      cancelledReservations,
-    },
     users: users.map((item) => ({
       id: item.id,
       name: item.name,
@@ -122,7 +120,6 @@ async function AdminDashboardContent() {
       role: item.role,
       isActive: item.isActive,
       createdAt: item.createdAt.toISOString(),
-      reservationCount: item._count.reservations,
     })),
     resources: resources.map((item) => ({
       id: item.id,
@@ -133,7 +130,6 @@ async function AdminDashboardContent() {
       description: item.description,
       status: item.status,
       createdAt: item.createdAt.toISOString(),
-      reservationCount: item._count.reservations,
     })),
     reservations: reservations.map((item) => ({
       id: item.id,
@@ -142,9 +138,12 @@ async function AdminDashboardContent() {
       startTime: item.startTime.toISOString(),
       endTime: item.endTime.toISOString(),
       status: item.status,
+      timing: timingOf(item.startTime, item.endTime, now),
+      resourceId: item.resourceId,
       userName: item.user.name,
       userEmail: item.user.email,
       resourceName: item.resource.name,
+      resourceType: item.resource.type,
       resourceLocation: item.resource.location,
     })),
   };
@@ -152,16 +151,16 @@ async function AdminDashboardContent() {
   return <AdminDashboardClient data={data} />;
 }
 
-export default function AdminDashboardPage() {
+export default function AdminPage() {
   return (
     <Suspense
       fallback={
         <main className="flex min-h-screen items-center justify-center bg-slate-50">
-          <p className="text-sm text-slate-600">Loading admin dashboard...</p>
+          <p className="text-sm text-slate-600">Loading admin workspace...</p>
         </main>
       }
     >
-      <AdminDashboardContent />
+      <ProtectedAdmin />
     </Suspense>
   );
 }
