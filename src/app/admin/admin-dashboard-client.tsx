@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 export type AdminDashboardData = {
   admin: {
+    id: string;
     name: string;
     email: string;
   };
@@ -94,7 +95,7 @@ export default function AdminDashboardClient({
   const [form, setForm] = useState(emptyForm);
   const [showUserForm, setShowUserForm] = useState(false);
   const [userForm, setUserForm] = useState(emptyUserForm);
-  const [temporaryPassword, setTemporaryPassword] = useState("");
+  const [deletingUserId, setDeletingUserId] = useState("");
 
   const firstName = data.admin.name.trim().split(/\s+/)[0] || "Admin";
   const activeRatio = data.stats.totalResources
@@ -121,7 +122,6 @@ export default function AdminDashboardClient({
     setSearch("");
     setError("");
     setSuccess("");
-    setTemporaryPassword("");
     setUserForm(emptyUserForm);
     setShowUserForm(true);
   }
@@ -191,7 +191,6 @@ export default function AdminDashboardClient({
     event.preventDefault();
     setError("");
     setSuccess("");
-    setTemporaryPassword("");
 
     setSaving(true);
 
@@ -209,23 +208,17 @@ export default function AdminDashboardClient({
 
       const payload: {
         message?: string;
-        temporaryPassword?: string;
       } = await response.json();
 
       if (!response.ok) {
         throw new Error(payload.message || "Unable to create the user.");
       }
 
-      if (!payload.temporaryPassword) {
-        throw new Error(
-          "User created, but the temporary password was not returned."
-        );
-      }
-
-      setTemporaryPassword(payload.temporaryPassword);
       setUserForm(emptyUserForm);
       setShowUserForm(false);
-      setSuccess("User created successfully.");
+      setSuccess(
+        "User created successfully. A temporary password was sent to their email."
+      );
 
       router.refresh();
     } catch (err) {
@@ -234,6 +227,48 @@ export default function AdminDashboardClient({
       );
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDeleteUser(user: {
+    id: string;
+    name: string;
+    reservationCount: number;
+  }) {
+    const reservationNote =
+      user.reservationCount === 0
+        ? ""
+        : user.reservationCount === 1
+          ? " Their reservation will also be removed."
+          : ` Their ${user.reservationCount} reservations will also be removed.`;
+    const confirmed = window.confirm(
+      `Delete ${user.name}?${reservationNote} This cannot be undone.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setDeletingUserId(user.id);
+
+    try {
+      const response = await fetch(`/api/users/${user.id}`, {
+        method: "DELETE",
+      });
+      const payload: { message?: string } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to delete the user.");
+      }
+
+      setSuccess("User deleted successfully.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setDeletingUserId("");
     }
   }
 
@@ -440,38 +475,6 @@ export default function AdminDashboardClient({
               >
                 ✓ {success}
               </div>
-            )}
-
-            {temporaryPassword && (
-              <section
-                aria-label="Temporary password"
-                className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4"
-              >
-                <h2 className="font-semibold text-amber-900">
-                  Temporary password
-                </h2>
-
-                <p className="mt-1 text-sm text-amber-800">
-                  Copy this password and provide it securely to the new member.
-                  It will not be shown again after leaving this page or refreshing.
-                </p>
-
-                <div className="mt-3 flex flex-wrap items-center gap-3">
-                  <code className="break-all rounded-lg bg-white px-3 py-2 text-sm text-slate-800">
-                    {temporaryPassword}
-                  </code>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void navigator.clipboard.writeText(temporaryPassword);
-                    }}
-                    className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100"
-                  >
-                    Copy password
-                  </button>
-                </div>
-              </section>
             )}
 
             {section === "overview" && (
@@ -722,8 +725,8 @@ export default function AdminDashboardClient({
                       </div>
 
                       <p className="text-sm text-slate-500">
-                        A temporary password will be generated. The new member
-                        must change it after signing in.
+                        A temporary password will be emailed to this address.
+                        The new member must change it after signing in.
                       </p>
 
                       <div className="flex justify-end gap-3 border-t border-slate-100 pt-5">
@@ -781,7 +784,7 @@ export default function AdminDashboardClient({
                   />
                 ) : (
                   <div className="overflow-x-auto">
-                    <table className="w-full min-w-[760px] text-left text-sm">
+                    <table className="w-full min-w-[860px] text-left text-sm">
                       <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
                         <tr>
                           <th className="px-6 py-4 font-semibold">User</th>
@@ -791,6 +794,7 @@ export default function AdminDashboardClient({
                             Reservations
                           </th>
                           <th className="px-6 py-4 font-semibold">Joined</th>
+                          <th className="px-6 py-4 font-semibold">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -828,6 +832,26 @@ export default function AdminDashboardClient({
                             </td>
                             <td className="px-6 py-4 text-slate-600">
                               {formatDate(user.createdAt)}
+                            </td>
+                            <td className="px-6 py-4">
+                              {user.id === data.admin.id ? (
+                                <span className="text-xs text-slate-400">
+                                  Current account
+                                </span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    void handleDeleteUser(user);
+                                  }}
+                                  disabled={deletingUserId !== ""}
+                                  className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                                >
+                                  {deletingUserId === user.id
+                                    ? "Deleting..."
+                                    : "Delete"}
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}

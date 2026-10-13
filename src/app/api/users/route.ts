@@ -2,8 +2,19 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@/generated/prisma/client";
+import { isMailConfigured, sendTemporaryPasswordEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/require-auth";
+
+function loginUrl(request: Request): string {
+  const configured = process.env.APP_URL?.trim().replace(/\/$/, "");
+
+  if (configured && /^https?:\/\//i.test(configured)) {
+    return `${configured}/login`;
+  }
+
+  return `${new URL(request.url).origin}/login`;
+}
 
 export async function POST(request: Request) {
   try {
@@ -59,6 +70,16 @@ export async function POST(request: Request) {
       );
     }
 
+    if (!isMailConfigured()) {
+      return NextResponse.json(
+        {
+          message:
+            "Email delivery is not configured, so the account was not created.",
+        },
+        { status: 503 }
+      );
+    }
+
     // Generate a temporary password on the server.
     const temporaryPassword = `${crypto.randomUUID()}Aa1!`;
     const passwordHash = await bcrypt.hash(temporaryPassword, 12);
@@ -83,11 +104,37 @@ export async function POST(request: Request) {
       },
     });
 
+    try {
+      await sendTemporaryPasswordEmail({
+        to: user.email,
+        name: user.name,
+        temporaryPassword,
+        loginUrl: loginUrl(request),
+      });
+    } catch (mailError) {
+      console.error("Failed to email temporary password:", mailError);
+
+      await prisma.user.delete({ where: { id: user.id } }).catch((deleteError) => {
+        console.error(
+          "Failed to roll back user after email failure:",
+          deleteError
+        );
+      });
+
+      return NextResponse.json(
+        {
+          message:
+            "The temporary password email could not be sent, so the account was not created.",
+        },
+        { status: 502 }
+      );
+    }
+
     return NextResponse.json(
       {
-        message: "User created successfully.",
+        message:
+          "User created successfully. A temporary password was emailed to them.",
         user,
-        temporaryPassword,
       },
       { status: 201 }
     );

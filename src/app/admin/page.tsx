@@ -20,6 +20,7 @@ async function AdminDashboardContent() {
   const user = await prisma.user.findUnique({
     where: { id: sessionUser.id },
     select: {
+      id: true,
       name: true,
       email: true,
       role: true,
@@ -95,6 +96,7 @@ async function AdminDashboardContent() {
 
   const data: AdminDashboardData = {
     admin: {
+      id: user.id,
       name: user.name,
       email: user.email,
     },
