@@ -39,6 +39,11 @@ export type UserDashboardData = {
     resourceType: string;
     resourceLocation: string;
   }[];
+  occupiedSlots: {
+    resourceId: string;
+    startTime: string;
+    endTime: string;
+  }[];
 };
 
 type Section = "overview" | "book" | "reservations";
@@ -75,9 +80,31 @@ const emptyBooking = {
   resourceId: "",
   title: "",
   purpose: "",
-  startTime: "",
-  endTime: "",
+  category: "",
+  date: "",
+  startClock: "",
+  endClock: "",
 };
+
+function formatClockLabel(clock: string) {
+  const [hours, minutes] = clock.split(":").map(Number);
+  return new Intl.DateTimeFormat("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(2026, 0, 1, hours, minutes, 0, 0));
+}
+
+const timeChoices = Array.from({ length: 24 * 4 }, (_, index) => {
+  const hours = Math.floor(index / 4);
+  const minutes = (index % 4) * 15;
+  const value = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+
+  return { value, label: formatClockLabel(value) };
+});
+
+const MIN_DURATION_MS = 15 * 60 * 1000;
+const MAX_DURATION_MS = 12 * 60 * 60 * 1000;
+const MAX_LEAD_MS = 90 * 24 * 60 * 60 * 1000;
 
 export default function DashboardClient({
   data,
@@ -85,11 +112,13 @@ export default function DashboardClient({
   data: UserDashboardData;
 }) {
   const router = useRouter();
-  const bookingFormRef = useRef<HTMLElement>(null);
   const [section, setSection] = useState<Section>("overview");
   const [filter, setFilter] = useState<ReservationFilter>("upcoming");
   const [search, setSearch] = useState("");
-  const [booking, setBooking] = useState(emptyBooking);
+  const [booking, setBooking] = useState(() => ({
+    ...emptyBooking,
+    ...defaultSlot(),
+  }));
   const [showBooking, setShowBooking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cancellingId, setCancellingId] = useState("");
@@ -117,21 +146,34 @@ export default function DashboardClient({
       reservation.status === "CONFIRMED" && reservation.timing === "past"
   ).length;
 
-  const filteredResources = useMemo(() => {
-    const term = search.trim().toLowerCase();
+  const slot = useMemo(
+    () => resolveSlot(booking.date, booking.startClock, booking.endClock),
+    [booking.date, booking.startClock, booking.endClock]
+  );
 
-    if (!term) {
-      return data.resources;
+  const categories = useMemo(() => {
+    const present = new Set(data.resources.map((resource) => resource.type));
+    const known = Object.keys(typeLabels).filter((type) => present.has(type));
+    const extra = [...present]
+      .filter((type) => !typeLabels[type])
+      .sort((a, b) => labelType(a).localeCompare(labelType(b)));
+
+    return [...known, ...extra];
+  }, [data.resources]);
+
+  const availableResources = useMemo(() => {
+    if (!slot.window) {
+      return [];
     }
 
     return data.resources.filter((resource) => {
-      return (
-        resource.name.toLowerCase().includes(term) ||
-        labelType(resource.type).toLowerCase().includes(term) ||
-        resource.location.toLowerCase().includes(term)
-      );
+      if (booking.category && resource.type !== booking.category) {
+        return false;
+      }
+
+      return isResourceFree(resource.id, slot.window!, data.occupiedSlots);
     });
-  }, [data.resources, search]);
+  }, [booking.category, data.occupiedSlots, data.resources, slot.window]);
 
   const visibleReservations = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -175,31 +217,99 @@ export default function DashboardClient({
     setSearch("");
     setError("");
     setSuccess("");
+
+    if (next !== "book") {
+      setShowBooking(false);
+    }
   }
 
   function openBooking(resourceId = "") {
-    const slot = defaultWindow();
+    const nextSlot = defaultSlot();
+    const resolved = resolveSlot(
+      nextSlot.date,
+      nextSlot.startClock,
+      nextSlot.endClock
+    );
+    const picked = data.resources.find((resource) => resource.id === resourceId);
+    const free =
+      Boolean(resourceId) &&
+      resolved.window !== null &&
+      isResourceFree(resourceId, resolved.window, data.occupiedSlots);
+
     setSection("book");
     setSearch("");
-    setError("");
     setSuccess("");
-    setShowBooking(true);
+    setShowBooking(free);
     setBooking({
       ...emptyBooking,
-      resourceId,
-      startTime: slot.start,
-      endTime: slot.end,
+      ...nextSlot,
+      category: picked?.type ?? "",
+      resourceId: free ? resourceId : "",
     });
+    setError(
+      resourceId && !free
+        ? "That resource is already booked for the next open time. Change the date or time, or pick another resource."
+        : ""
+    );
   }
 
-  useEffect(() => {
-    if (section === "book" && showBooking) {
-      bookingFormRef.current?.scrollIntoView({
-        behavior: "smooth",
-        block: "start",
-      });
+  function updateSlot(patch: Partial<Pick<typeof booking, "date" | "startClock" | "endClock">>) {
+    const next = { ...booking, ...patch };
+    const resolved = resolveSlot(next.date, next.startClock, next.endClock);
+    const stillFree =
+      Boolean(next.resourceId) &&
+      resolved.window !== null &&
+      isResourceFree(next.resourceId, resolved.window, data.occupiedSlots);
+
+    if (next.resourceId && !stillFree) {
+      setShowBooking(false);
+      setBooking({ ...next, resourceId: "" });
+      setError(
+        resolved.window
+          ? "That resource is not free for the selected time."
+          : ""
+      );
+      return;
     }
-  }, [section, showBooking, booking.resourceId]);
+
+    setBooking(next);
+  }
+
+  function updateCategory(category: string) {
+    const selected = data.resources.find(
+      (resource) => resource.id === booking.resourceId
+    );
+
+    if (selected && category && selected.type !== category) {
+      setShowBooking(false);
+      setBooking({ ...booking, category, resourceId: "" });
+      return;
+    }
+
+    setBooking({ ...booking, category });
+  }
+
+  function chooseResource(resourceId: string) {
+    if (!slot.window) {
+      setError(slot.error || "Choose a valid date and time first.");
+      return;
+    }
+
+    if (!isResourceFree(resourceId, slot.window, data.occupiedSlots)) {
+      setError("That resource is already booked for the selected time.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setBooking((current) => ({
+      ...current,
+      resourceId,
+      title: current.resourceId === resourceId ? current.title : "",
+      purpose: current.resourceId === resourceId ? current.purpose : "",
+    }));
+    setShowBooking(true);
+  }
 
   async function handleLogout() {
     setLoggingOut(true);
@@ -228,18 +338,32 @@ export default function DashboardClient({
       return;
     }
 
-    const start = new Date(booking.startTime);
-    const end = new Date(booking.endTime);
+    const resolved = resolveSlot(
+      booking.date,
+      booking.startClock,
+      booking.endClock
+    );
 
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-      setError("Choose a valid start and end time.");
+    if (!resolved.window) {
+      setError(resolved.error || "Choose a valid date and time.");
       return;
     }
 
-    if (end.getTime() <= start.getTime()) {
-      setError("End time must be after the start time.");
+    if (
+      !isResourceFree(
+        booking.resourceId,
+        resolved.window,
+        data.occupiedSlots
+      )
+    ) {
+      setShowBooking(false);
+      setBooking((current) => ({ ...current, resourceId: "" }));
+      setError("That resource is already booked for the selected time.");
       return;
     }
+
+    const start = resolved.window.start;
+    const end = resolved.window.end;
 
     setSaving(true);
 
@@ -262,7 +386,7 @@ export default function DashboardClient({
         throw new Error(payload.message || "Unable to book that resource.");
       }
 
-      setBooking(emptyBooking);
+      setBooking({ ...emptyBooking, ...defaultSlot() });
       setShowBooking(false);
       setSearch("");
       setFilter("upcoming");
@@ -430,6 +554,14 @@ export default function DashboardClient({
                   {item.label}
                 </button>
               ))}
+              {data.user.role === "ADMIN" && (
+                <a
+                  href="/admin"
+                  className="shrink-0 rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600"
+                >
+                  Admin
+                </a>
+              )}
             </div>
           </header>
 
@@ -611,185 +743,252 @@ export default function DashboardClient({
             )}
 
             {section === "book" && (
-              <>
-                {showBooking && (
-                  <section
-                    ref={bookingFormRef}
-                    className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7"
-                  >
-                    <div className="mb-6 flex items-start justify-between gap-4">
-                      <div>
-                        <h2 className="text-lg font-bold">Reserve a time</h2>
-                        <p className="mt-1 text-sm text-slate-500">
-                          {selectedResource
-                            ? `${selectedResource.name} · ${selectedResource.location}`
-                            : "Choose a resource, then pick a time that is still free."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setShowBooking(false)}
-                        className="rounded-lg px-3 py-2 text-slate-500 hover:bg-slate-100"
-                        aria-label="Close booking form"
-                      >
-                        ✕
-                      </button>
-                    </div>
+              <section className="overflow-visible rounded-2xl border border-slate-200 bg-[#e9ecef] shadow-sm">
+                <div className="flex min-h-[36rem] flex-col lg:flex-row">
+                  <aside className="w-full shrink-0 bg-[#1e3348] px-5 py-6 text-white lg:w-96">
+                    <h2 className="text-lg font-semibold">Booking Details</h2>
+                    <div className="my-4 h-px bg-white/25" />
 
-                    <form onSubmit={handleBook} className="space-y-5">
-                      <FormField label="Resource">
+                    <label className="block text-sm text-slate-200">
+                      Category
+                      <select
+                        value={booking.category}
+                        onChange={(event) => updateCategory(event.target.value)}
+                        aria-label="Resource category"
+                        className="mt-2 w-full rounded-md bg-white px-3 py-2.5 text-sm font-medium text-slate-800 outline-none"
+                      >
+                        <option value="">All categories</option>
+                        {categories.map((type) => (
+                          <option key={type} value={type}>
+                            {labelType(type)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="my-5 h-px bg-white/25" />
+
+                    <BookingDateField
+                      value={booking.date}
+                      onChange={(date) => updateSlot({ date })}
+                    />
+
+                    <div className="my-5 h-px bg-white/25" />
+
+                    <div>
+                      <p className="text-sm text-slate-200">Time</p>
+                      <div className="mt-2 flex items-center gap-2 rounded-md bg-white px-3 py-1.5 text-slate-800">
                         <select
                           required
-                          value={booking.resourceId}
+                          value={booking.startClock}
                           onChange={(event) =>
-                            setBooking({
-                              ...booking,
-                              resourceId: event.target.value,
-                            })
+                            updateSlot({ startClock: event.target.value })
                           }
-                          className={inputClass}
+                          aria-label="Start time"
+                          className="min-w-0 flex-1 appearance-none bg-transparent py-1 text-sm font-medium outline-none"
                         >
-                          <option value="">Select a resource</option>
-                          {data.resources.map((resource) => (
-                            <option key={resource.id} value={resource.id}>
-                              {resource.name} · {resource.location}
+                          {timeChoices.map((choice) => (
+                            <option key={`start-${choice.value}`} value={choice.value}>
+                              {choice.label}
                             </option>
                           ))}
                         </select>
-                      </FormField>
-
-                      <div className="grid gap-5 sm:grid-cols-2">
-                        <FormField label="Title">
-                          <input
-                            required
-                            maxLength={120}
-                            value={booking.title}
-                            onChange={(event) =>
-                              setBooking({
-                                ...booking,
-                                title: event.target.value,
-                              })
-                            }
-                            placeholder="e.g. Sprint planning"
-                            className={inputClass}
-                          />
-                        </FormField>
-                        <FormField label="Purpose (optional)">
-                          <input
-                            maxLength={500}
-                            value={booking.purpose}
-                            onChange={(event) =>
-                              setBooking({
-                                ...booking,
-                                purpose: event.target.value,
-                              })
-                            }
-                            placeholder="What is this booking for?"
-                            className={inputClass}
-                          />
-                        </FormField>
-                        <FormField label="Starts">
-                          <input
-                            required
-                            type="datetime-local"
-                            value={booking.startTime}
-                            onChange={(event) =>
-                              setBooking({
-                                ...booking,
-                                startTime: event.target.value,
-                              })
-                            }
-                            className={inputClass}
-                          />
-                        </FormField>
-                        <FormField label="Ends">
-                          <input
-                            required
-                            type="datetime-local"
-                            value={booking.endTime}
-                            onChange={(event) =>
-                              setBooking({
-                                ...booking,
-                                endTime: event.target.value,
-                              })
-                            }
-                            className={inputClass}
-                          />
-                        </FormField>
-                      </div>
-
-                      <p className="text-xs leading-5 text-slate-500">
-                        Bookings must last 15 minutes to 12 hours, can be made
-                        up to 90 days ahead, and cannot overlap a confirmed
-                        reservation.
-                      </p>
-
-                      <div className="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-5">
-                        <button
-                          type="button"
-                          onClick={() => setShowBooking(false)}
-                          className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                        <span className="text-slate-400">–</span>
+                        <select
+                          required
+                          value={booking.endClock}
+                          onChange={(event) =>
+                            updateSlot({ endClock: event.target.value })
+                          }
+                          aria-label="End time"
+                          className="min-w-0 flex-1 appearance-none bg-transparent py-1 text-sm font-medium outline-none"
                         >
-                          Cancel
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={saving || data.resources.length === 0}
-                          className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {saving ? "Booking..." : "Confirm booking"}
-                        </button>
+                          {timeChoices.map((choice) => (
+                            <option key={`end-${choice.value}`} value={choice.value}>
+                              {choice.label}
+                            </option>
+                          ))}
+                        </select>
+                        <ClockIcon />
                       </div>
-                    </form>
-                  </section>
-                )}
+                      {slot.window && (
+                        <p className="mt-2 text-xs text-slate-300">
+                          {formatDuration(
+                            slot.window.end.getTime() - slot.window.start.getTime()
+                          )}
+                          {booking.endClock <= booking.startClock
+                            ? " · ends the next day"
+                            : ""}
+                        </p>
+                      )}
+                      {slot.error && (
+                        <p className="mt-3 text-xs leading-5 text-amber-200">
+                          {slot.error}
+                        </p>
+                      )}
+                    </div>
+                  </aside>
 
-                <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                  <div className="flex flex-col gap-4 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+                  <div className="min-w-0 flex-1 p-5 sm:p-6">
+                    <h2 className="text-base font-medium text-slate-800">
+                      Select an available resource:
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {slot.window
+                        ? availableResources.length === 1
+                          ? "1 resource available"
+                          : `${availableResources.length} resources available`
+                        : "Choose a valid date and time"}
+                    </p>
+
+                    {!slot.window ? (
+                      <EmptyState
+                        title="Pick a date and time"
+                        detail={
+                          slot.error ||
+                          "Set when you need the resource. Only free ones will be shown."
+                        }
+                      />
+                    ) : availableResources.length === 0 ? (
+                      <EmptyState
+                        title={
+                          data.resources.length === 0
+                            ? "No resources available"
+                            : booking.category &&
+                                !data.resources.some(
+                                  (resource) => resource.type === booking.category
+                                )
+                              ? "No resources in this category"
+                              : "Nothing is free for this time"
+                        }
+                        detail={
+                          data.resources.length === 0
+                            ? "Ask an administrator to add a resource you can book."
+                            : booking.category &&
+                                !data.resources.some(
+                                  (resource) => resource.type === booking.category
+                                )
+                              ? "Choose another category, or ask an administrator to add one."
+                              : booking.category
+                                ? `No ${labelType(booking.category).toLowerCase()} is free then. Try another time or category.`
+                                : "Every resource is already booked then. Try another date or time."
+                        }
+                      />
+                    ) : (
+                      <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {availableResources.map((resource) => (
+                          <ResourceCard
+                            key={resource.id}
+                            resource={resource}
+                            selected={
+                              booking.resourceId === resource.id && showBooking
+                            }
+                            onBook={() => chooseResource(resource.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {showBooking && selectedResource && section === "book" && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+                <form
+                  onSubmit={handleBook}
+                  className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+                >
+                  <div className="flex items-start justify-between gap-4">
                     <div>
-                      <h2 className="text-lg font-bold">Available resources</h2>
+                      <h2 className="text-lg font-bold">
+                        Book {selectedResource.name}
+                      </h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Choose something to reserve. Only active resources are
-                        shown.
+                        {formatBookingDate(booking.date)} · {booking.startClock}{" "}
+                        – {booking.endClock}
+                        {booking.endClock <= booking.startClock
+                          ? " (next day)"
+                          : ""}
+                      </p>
+                      <p className="mt-1 text-sm text-slate-500">
+                        {labelType(selectedResource.type)} · Capacity{" "}
+                        {selectedResource.capacity} · {selectedResource.location}
                       </p>
                     </div>
-                    <input
-                      type="search"
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Search resources..."
-                      aria-label="Search resources"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2.5 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 sm:w-64"
-                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowBooking(false);
+                        setBooking((current) => ({
+                          ...current,
+                          resourceId: "",
+                        }));
+                      }}
+                      className="rounded-lg px-3 py-2 text-slate-500 hover:bg-slate-100"
+                      aria-label="Close booking form"
+                    >
+                      ✕
+                    </button>
                   </div>
 
-                  {filteredResources.length === 0 ? (
-                    <EmptyState
-                      title={
-                        data.resources.length === 0
-                          ? "No resources available"
-                          : "No matching resources"
-                      }
-                      detail={
-                        data.resources.length === 0
-                          ? "Ask an administrator to add a resource you can book."
-                          : "Try another name, type, or location."
-                      }
-                    />
-                  ) : (
-                    <div className="grid gap-4 p-5 sm:grid-cols-2 sm:p-6 xl:grid-cols-3">
-                      {filteredResources.map((resource) => (
-                        <ResourceCard
-                          key={resource.id}
-                          resource={resource}
-                          selected={booking.resourceId === resource.id && showBooking}
-                          onBook={() => openBooking(resource.id)}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              </>
+                  <div className="mt-5 space-y-4">
+                    <FormField label="Title">
+                      <input
+                        required
+                        autoFocus
+                        maxLength={120}
+                        value={booking.title}
+                        onChange={(event) =>
+                          setBooking({
+                            ...booking,
+                            title: event.target.value,
+                          })
+                        }
+                        placeholder="e.g. Sprint planning"
+                        className={inputClass}
+                      />
+                    </FormField>
+                    <FormField label="Purpose (optional)">
+                      <input
+                        maxLength={500}
+                        value={booking.purpose}
+                        onChange={(event) =>
+                          setBooking({
+                            ...booking,
+                            purpose: event.target.value,
+                          })
+                        }
+                        placeholder="What is this booking for?"
+                        className={inputClass}
+                      />
+                    </FormField>
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap justify-end gap-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowBooking(false);
+                        setBooking((current) => ({
+                          ...current,
+                          resourceId: "",
+                        }));
+                      }}
+                      className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={saving}
+                      className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {saving ? "Booking..." : "Confirm booking"}
+                    </button>
+                  </div>
+                </form>
+              </div>
             )}
 
             {section === "reservations" && (
@@ -885,41 +1084,275 @@ function ResourceCard({
 }) {
   return (
     <article
-      className={`flex h-full flex-col rounded-2xl border p-5 ${
-        selected
-          ? "border-indigo-300 bg-indigo-50/40"
-          : "border-slate-200 bg-white"
+      className={`flex h-full flex-col items-center rounded-xl bg-white px-4 py-5 text-center shadow-sm ${
+        selected ? "ring-2 ring-blue-500" : ""
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50 font-semibold text-indigo-700">
-          {resource.name.charAt(0).toUpperCase()}
-        </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-          {labelType(resource.type)}
-        </span>
-      </div>
-      <h3 className="mt-4 font-bold text-slate-900">{resource.name}</h3>
-      <p className="mt-1 text-sm text-slate-500">{resource.location}</p>
-      <p className="mt-3 line-clamp-2 text-sm leading-6 text-slate-600">
-        {resource.description || "No extra details for this resource."}
+      <h3 className="font-semibold text-slate-800">{resource.name}</h3>
+      <p className="mt-2 text-sm text-slate-600">
+        Capacity={resource.capacity}
       </p>
-      <p className="mt-4 text-xs font-medium text-slate-500">
-        Capacity {resource.capacity}
-        {resource.upcomingBookings > 0
-          ? ` · ${resource.upcomingBookings} upcoming booking${
-              resource.upcomingBookings === 1 ? "" : "s"
-            }`
-          : " · No upcoming bookings"}
-      </p>
+      <p className="text-sm text-slate-600">{labelType(resource.type)}</p>
       <button
         type="button"
         onClick={onBook}
-        className="mt-5 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+        className="mt-4 rounded-lg bg-blue-600 px-6 py-2 text-xs font-bold tracking-wide text-white shadow-sm transition hover:bg-blue-700"
       >
-        Book this
+        BOOK
       </button>
     </article>
+  );
+}
+
+function BookingDateField({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (date: string) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const selected = value ? combineLocal(value, "12:00") : null;
+  const [month, setMonth] = useState(() => monthStart(selected ?? new Date()));
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    function onPointerDown(event: MouseEvent) {
+      if (!rootRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  const today = startOfDay(new Date());
+  const latest = startOfDay(addDays(today, 90));
+  const firstMonth = monthStart(today);
+  const lastMonth = monthStart(latest);
+  const days = calendarDays(month);
+
+  const summary = dateSummary(value);
+
+  return (
+    <div ref={rootRef} className="relative">
+      <p className="text-sm text-slate-200">Date</p>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-label="Choose a date from the calendar"
+        onClick={() => {
+          if (!open) {
+            setMonth(monthStart(selected ?? new Date()));
+          }
+          setOpen((current) => !current);
+        }}
+        className={`mt-2 flex w-full items-center gap-3 rounded-lg bg-white px-3 py-2 text-left text-slate-800 ${
+          open ? "ring-2 ring-blue-300" : ""
+        }`}
+      >
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold">
+            {summary.title}
+          </span>
+          <span className="mt-0.5 block text-xs text-slate-500">
+            {summary.detail}
+          </span>
+        </span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50">
+          <CalendarIcon />
+        </span>
+      </button>
+
+      {open && (
+        <div className="absolute left-0 right-0 top-full z-30 mt-2 rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-xl">
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
+              aria-label="Previous month"
+              disabled={month.getTime() <= firstMonth.getTime()}
+              onClick={() => setMonth(addMonths(month, -1))}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+            >
+              <ChevronIcon direction="left" />
+            </button>
+            <p className="text-sm font-semibold">
+              {new Intl.DateTimeFormat("en-US", {
+                month: "long",
+                year: "numeric",
+              }).format(month)}
+            </p>
+            <button
+              type="button"
+              aria-label="Next month"
+              disabled={month.getTime() >= lastMonth.getTime()}
+              onClick={() => setMonth(addMonths(month, 1))}
+              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+            >
+              <ChevronIcon direction="right" />
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400">
+            {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((label) => (
+              <span key={label} className="flex h-8 items-center justify-center">
+                {label}
+              </span>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7">
+            {days.map((day, index) => {
+              if (!day) {
+                return <span key={`empty-${index}`} className="h-9" />;
+              }
+
+              const key = toDateInput(day);
+              const disabled = day < today || day > latest;
+              const isSelected = value === key;
+              const isToday = toDateInput(today) === key;
+
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={disabled}
+                  aria-pressed={isSelected}
+                  aria-label={new Intl.DateTimeFormat("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                  }).format(day)}
+                  onClick={() => {
+                    onChange(key);
+                    setOpen(false);
+                  }}
+                  className={`mx-auto flex h-9 w-9 items-center justify-center rounded-full text-sm ${
+                    isSelected
+                      ? "bg-blue-600 font-semibold text-white"
+                      : disabled
+                        ? "cursor-not-allowed text-slate-300"
+                        : isToday
+                          ? "font-semibold text-blue-700 ring-1 ring-blue-500 hover:bg-blue-50"
+                          : "text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  {day.getDate()}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+            <button
+              type="button"
+              onClick={() => {
+                onChange(toDateInput(today));
+                setMonth(firstMonth);
+                setOpen(false);
+              }}
+              className="rounded-md px-2 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-50"
+            >
+              Today
+            </button>
+            <p className="text-[11px] text-slate-400">Next 90 days</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-5 w-5 text-blue-600"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <rect x="3.5" y="5" width="17" height="15" rx="2" />
+      <path d="M8 3.5v3M16 3.5v3M3.5 10h17" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ direction }: { direction: "left" | "right" }) {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-4 w-4"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+    >
+      <path
+        d={direction === "left" ? "M14.5 6.5 9 12l5.5 5.5" : "M9.5 6.5 15 12l-5.5 5.5"}
+      />
+    </svg>
+  );
+}
+
+function dateSummary(value: string) {
+  if (!value) {
+    return { title: "Select a date", detail: "Choose an upcoming day" };
+  }
+
+  const day = startOfDay(combineLocal(value, "12:00"));
+  const today = startOfDay(new Date());
+  const diff = Math.round((day.getTime() - today.getTime()) / 86400000);
+  const title = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(day);
+
+  if (diff === 0) {
+    return { title, detail: "Today" };
+  }
+
+  if (diff === 1) {
+    return { title, detail: "Tomorrow" };
+  }
+
+  if (diff > 1) {
+    return { title, detail: `In ${diff} days` };
+  }
+
+  return { title, detail: "Past date" };
+}
+
+function ClockIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      viewBox="0 0 24 24"
+      className="h-5 w-5 shrink-0 text-blue-600"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 8v4.5l3 2" />
+    </svg>
   );
 }
 
@@ -1117,23 +1550,167 @@ function labelType(type: string) {
   );
 }
 
-function defaultWindow() {
+function defaultSlot() {
   const start = new Date();
-  start.setMinutes(0, 0, 0);
-  start.setHours(start.getHours() + 1);
-  const end = new Date(start);
-  end.setHours(end.getHours() + 1);
+  start.setSeconds(0, 0);
+  const remainder = start.getMinutes() % 30;
+  start.setMinutes(start.getMinutes() + (remainder === 0 ? 30 : 30 - remainder));
+  const end = new Date(start.getTime() + 30 * 60 * 1000);
 
   return {
-    start: toLocalInput(start),
-    end: toLocalInput(end),
+    date: toDateInput(start),
+    startClock: toClockInput(start),
+    endClock: toClockInput(end),
   };
 }
 
-function toLocalInput(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0");
+function resolveSlot(date: string, startClock: string, endClock: string) {
+  if (!date || !startClock || !endClock) {
+    return {
+      window: null as { start: Date; end: Date } | null,
+      error: "Choose a date and a start and end time.",
+    };
+  }
 
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const start = combineLocal(date, startClock);
+  let end = combineLocal(date, endClock);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return {
+      window: null,
+      error: "Choose a valid date and time.",
+    };
+  }
+
+  if (end.getTime() <= start.getTime()) {
+    end = addDays(end, 1);
+  }
+
+  const duration = end.getTime() - start.getTime();
+
+  if (duration < MIN_DURATION_MS || duration > MAX_DURATION_MS) {
+    return {
+      window: null,
+      error: "A booking must last between 15 minutes and 12 hours.",
+    };
+  }
+
+  const now = Date.now();
+
+  if (start.getTime() < now - 60 * 1000) {
+    return {
+      window: null,
+      error: "Start time cannot be in the past.",
+    };
+  }
+
+  if (start.getTime() > now + MAX_LEAD_MS) {
+    return {
+      window: null,
+      error: "Bookings can be made up to 90 days ahead.",
+    };
+  }
+
+  return { window: { start, end }, error: "" };
+}
+
+function isResourceFree(
+  resourceId: string,
+  window: { start: Date; end: Date },
+  slots: UserDashboardData["occupiedSlots"]
+) {
+  return !slots.some((slot) => {
+    if (slot.resourceId !== resourceId) {
+      return false;
+    }
+
+    const start = new Date(slot.startTime);
+    const end = new Date(slot.endTime);
+    return start < window.end && end > window.start;
+  });
+}
+
+function combineLocal(date: string, time: string) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hours, minutes] = time.split(":").map(Number);
+  return new Date(year, month - 1, day, hours, minutes, 0, 0);
+}
+
+function toDateInput(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function toClockInput(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function monthStart(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function addMonths(date: Date, count: number) {
+  return new Date(date.getFullYear(), date.getMonth() + count, 1);
+}
+
+function calendarDays(month: Date) {
+  const firstWeekday = monthStart(month).getDay();
+  const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const cells: (Date | null)[] = Array.from({ length: firstWeekday }, () => null);
+
+  for (let day = 1; day <= count; day += 1) {
+    cells.push(new Date(month.getFullYear(), month.getMonth(), day));
+  }
+
+  return cells;
+}
+
+function formatBookingDate(date: string) {
+  if (!date) {
+    return "Select a date";
+  }
+
+  const value = combineLocal(date, "00:00");
+  const today = new Date();
+
+  if (value.toDateString() === today.toDateString()) {
+    return "Today";
+  }
+
+  const tomorrow = addDays(today, 1);
+
+  if (value.toDateString() === tomorrow.toDateString()) {
+    return "Tomorrow";
+  }
+
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(value);
+}
+
+function formatDuration(ms: number) {
+  const minutes = Math.round(ms / 60000);
+
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest === 0 ? `${hours} hr` : `${hours} hr ${rest} min`;
 }
 
 function formatRange(startIso: string, endIso: string) {

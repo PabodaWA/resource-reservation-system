@@ -51,6 +51,28 @@ export async function POST(request: Request) {
     const resourceId = body.resourceId.trim();
     const title = body.title.trim();
     const purpose = "purpose" in body ? body.purpose : undefined;
+    const requestedUserId = "userId" in body ? body.userId : undefined;
+
+    if (
+      requestedUserId !== undefined &&
+      (typeof requestedUserId !== "string" ||
+        !requestedUserId.trim() ||
+        requestedUserId.trim().length > 64)
+    ) {
+      return NextResponse.json(
+        { message: "Choose a valid person for this reservation." },
+        { status: 400 }
+      );
+    }
+
+    const bookForUserId = requestedUserId?.trim() || auth.user.id;
+
+    if (bookForUserId !== auth.user.id && auth.user.role !== "ADMIN") {
+      return NextResponse.json(
+        { message: "You can only book a reservation for yourself." },
+        { status: 403 }
+      );
+    }
 
     if (!resourceId || resourceId.length > 64) {
       return NextResponse.json(
@@ -133,6 +155,18 @@ export async function POST(request: Request) {
           );
         }
 
+        const bookedUser = await tx.user.findUnique({
+          where: { id: bookForUserId },
+          select: { id: true, isActive: true },
+        });
+
+        if (!bookedUser || !bookedUser.isActive) {
+          throw new ReservationRequestError(
+            "That person cannot receive a booking.",
+            404
+          );
+        }
+
         const conflict = await tx.reservation.findFirst({
           where: {
             resourceId,
@@ -159,7 +193,7 @@ export async function POST(request: Request) {
                 : null,
             startTime: start,
             endTime: end,
-            userId: auth.user.id,
+            userId: bookedUser.id,
             resourceId,
           },
           select: { id: true },

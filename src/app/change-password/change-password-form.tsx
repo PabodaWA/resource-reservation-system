@@ -50,7 +50,7 @@ export default function ChangePasswordPage() {
         }),
       });
 
-      const data: { message?: string } = await response.json();
+      const data: { message?: string; role?: string } = await response.json();
 
       if (!response.ok) {
         setError(
@@ -61,7 +61,7 @@ export default function ChangePasswordPage() {
 
       setSuccess("Password changed successfully. Redirecting...");
 
-      router.replace("/");
+      router.replace(data.role === "ADMIN" ? "/admin" : "/");
       router.refresh();
     } catch {
       setError("Unable to connect to the server. Please try again.");

@@ -50,8 +50,9 @@ async function ProtectedDashboard() {
   }
 
   const now = new Date();
+  const horizon = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000);
 
-  const [resources, reservations, upcomingSlots] = await Promise.all([
+  const [resources, reservations, upcomingSlots, occupied] = await Promise.all([
     prisma.resource.findMany({
       where: { status: "ACTIVE" },
       orderBy: { name: "asc" },
@@ -92,6 +93,18 @@ async function ProtectedDashboard() {
       },
       _count: { _all: true },
     }),
+    prisma.reservation.findMany({
+      where: {
+        status: "CONFIRMED",
+        endTime: { gt: now },
+        startTime: { lt: horizon },
+      },
+      select: {
+        resourceId: true,
+        startTime: true,
+        endTime: true,
+      },
+    }),
   ]);
 
   const upcomingByResource = new Map(
@@ -126,6 +139,11 @@ async function ProtectedDashboard() {
       resourceName: reservation.resource.name,
       resourceType: reservation.resource.type,
       resourceLocation: reservation.resource.location,
+    })),
+    occupiedSlots: occupied.map((slot) => ({
+      resourceId: slot.resourceId,
+      startTime: slot.startTime.toISOString(),
+      endTime: slot.endTime.toISOString(),
     })),
   };
 
