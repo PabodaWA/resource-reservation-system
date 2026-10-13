@@ -84,7 +84,6 @@ const inputClass =
 const emptyUser = {
   name: "",
   email: "",
-  password: "",
   role: "MEMBER" as "ADMIN" | "MEMBER",
 };
 
@@ -111,6 +110,7 @@ export default function AdminDashboardClient({
   const [reservationFilter, setReservationFilter] =
     useState<ReservationFilter>("upcoming");
   const [savingUser, setSavingUser] = useState(false);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [savingResource, setSavingResource] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
@@ -234,7 +234,6 @@ export default function AdminDashboardClient({
 
     const name = userForm.name.trim();
     const email = userForm.email.trim();
-    const password = userForm.password;
 
     if (!name || name.length > 120) {
       setError("Name must be between 1 and 120 characters.");
@@ -243,11 +242,6 @@ export default function AdminDashboardClient({
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setError("Enter a valid email address.");
-      return;
-    }
-
-    if (password.length < 12 || password.length > 128) {
-      setError("Temporary password must contain 12–128 characters.");
       return;
     }
 
@@ -260,7 +254,6 @@ export default function AdminDashboardClient({
         body: JSON.stringify({
           name,
           email,
-          password,
           role: userForm.role,
         }),
       });
@@ -272,7 +265,7 @@ export default function AdminDashboardClient({
       }
 
       setSuccess(
-        `Created ${name}. Temporary password: ${password}. They must change it at first login.`
+        `Created ${name}. Sign-in details were emailed to ${email}.`
       );
       setUserForm(emptyUser);
       router.refresh();
@@ -280,6 +273,45 @@ export default function AdminDashboardClient({
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setSavingUser(false);
+    }
+  }
+
+  async function handleDeleteUser(user: AdminDashboardData["users"][number]) {
+    setError("");
+    setSuccess("");
+
+    if (user.role !== "MEMBER") {
+      setError("Only member accounts can be deleted.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete ${user.name}? Their account and reservations will be removed.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingUserId(user.id);
+
+    try {
+      const response = await fetch(`/api/users/${user.id}`, {
+        method: "DELETE",
+      });
+
+      const payload: { message?: string } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to delete this member.");
+      }
+
+      setSuccess(`${user.name} was deleted.`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setDeletingUserId(null);
     }
   }
 
@@ -704,7 +736,7 @@ export default function AdminDashboardClient({
                 >
                   <h2 className="text-lg font-bold">New user</h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    They sign in with this temporary password, then choose
+                    They receive this temporary password by email, then choose
                     their own.
                   </p>
 
@@ -761,38 +793,6 @@ export default function AdminDashboardClient({
                     </select>
                   </label>
 
-                  <label className="mt-4 block text-sm font-medium text-slate-700">
-                    Temporary password
-                    <input
-                      required
-                      value={userForm.password}
-                      onChange={(event) =>
-                        setUserForm((current) => ({
-                          ...current,
-                          password: event.target.value,
-                        }))
-                      }
-                      minLength={12}
-                      maxLength={128}
-                      autoComplete="new-password"
-                      className={`${inputClass} mt-2 font-mono`}
-                      placeholder="At least 12 characters"
-                    />
-                  </label>
-
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setUserForm((current) => ({
-                        ...current,
-                        password: createTemporaryPassword(),
-                      }))
-                    }
-                    className="mt-3 text-sm font-semibold text-indigo-700 hover:text-indigo-800"
-                  >
-                    Generate a temporary password
-                  </button>
-
                   <button
                     type="submit"
                     disabled={savingUser}
@@ -845,6 +845,18 @@ export default function AdminDashboardClient({
                             <Badge tone={user.isActive ? "success" : "muted"}>
                               {user.isActive ? "Active" : "Inactive"}
                             </Badge>
+                            {user.role === "MEMBER" && (
+                              <button
+                                type="button"
+                                disabled={deletingUserId !== null}
+                                onClick={() => void handleDeleteUser(user)}
+                                className="rounded-lg px-2.5 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60"
+                              >
+                                {deletingUserId === user.id
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </button>
+                            )}
                           </div>
                         </li>
                       ))}
@@ -1224,13 +1236,6 @@ function labelType(type: string) {
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ")
   );
-}
-
-function createTemporaryPassword() {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
-  const values = new Uint32Array(14);
-  crypto.getRandomValues(values);
-  return `Rf-${Array.from(values, (value) => alphabet[value % alphabet.length]).join("")}`;
 }
 
 function formatRange(startIso: string, endIso: string) {
