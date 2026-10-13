@@ -1,5 +1,3 @@
-import nodemailer from "nodemailer";
-
 type TemporaryPasswordEmail = {
   to: string;
   name: string;
@@ -29,7 +27,7 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-function createTransporter() {
+async function createTransporter() {
   const host = readEnv("SMTP_HOST");
   const user = readEnv("SMTP_USER");
   const pass = readEnv("SMTP_PASS");
@@ -43,6 +41,11 @@ function createTransporter() {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error("SMTP_PORT is invalid.");
   }
+
+  // Loaded here so this file stays a synchronous module. A top-level
+  // nodemailer import makes Turbopack evaluate it asynchronously and the
+  // participant notice export is then missing at call time.
+  const { default: nodemailer } = await import("nodemailer");
 
   return {
     from,
@@ -68,7 +71,7 @@ type ParticipantNoticeEmail = {
 export async function sendParticipantNotice(
   input: ParticipantNoticeEmail
 ): Promise<void> {
-  const { from, transporter } = createTransporter();
+  const { from, transporter } = await createTransporter();
   const safeName = escapeHtml(input.name);
   const safeBooker = escapeHtml(input.bookerName);
   const safeResource = escapeHtml(input.resourceName);
@@ -107,7 +110,7 @@ export async function sendParticipantNotice(
 export async function sendTemporaryPasswordEmail(
   input: TemporaryPasswordEmail
 ): Promise<void> {
-  const { from, transporter } = createTransporter();
+  const { from, transporter } = await createTransporter();
 
   const safeName = escapeHtml(input.name);
   const safeEmail = escapeHtml(input.to);
