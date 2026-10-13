@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
+import { isMailConfigured, sendParticipantNotice } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/require-auth";
+import {
+  ParticipantInputError,
+  assertParticipantCapacity,
+  formatBookingWindow,
+  isValidTimeZone,
+  parseParticipants,
+} from "@/lib/reservation-participants";
 
 const MIN_DURATION_MS = 15 * 60 * 1000;
 const MAX_DURATION_MS = 12 * 60 * 60 * 1000;
@@ -141,11 +149,39 @@ export async function POST(request: Request) {
       );
     }
 
+    let participants;
+
+    try {
+      participants = parseParticipants(
+        "participants" in body ? body.participants : undefined
+      );
+    } catch (error) {
+      if (error instanceof ParticipantInputError) {
+        return NextResponse.json({ message: error.message }, { status: 400 });
+      }
+
+      throw error;
+    }
+
+    const notifyParticipants =
+      "notifyParticipants" in body && body.notifyParticipants === true;
+    const requestedTimeZone =
+      "timeZone" in body && typeof body.timeZone === "string"
+        ? body.timeZone.trim()
+        : "";
+    const timeZone = isValidTimeZone(requestedTimeZone)
+      ? requestedTimeZone
+      : "UTC";
+
     const reservation = await prisma.$transaction(
       async (tx) => {
         const resource = await tx.resource.findUnique({
           where: { id: resourceId },
-          select: { id: true, status: true },
+          select: {
+            id: true,
+            capacity: true,
+            status: true,
+          },
         });
 
         if (!resource || resource.status !== "ACTIVE") {
@@ -157,7 +193,7 @@ export async function POST(request: Request) {
 
         const bookedUser = await tx.user.findUnique({
           where: { id: bookForUserId },
-          select: { id: true, isActive: true },
+          select: { id: true, name: true, email: true, isActive: true },
         });
 
         if (!bookedUser || !bookedUser.isActive) {
@@ -165,6 +201,20 @@ export async function POST(request: Request) {
             "That person cannot receive a booking.",
             404
           );
+        }
+
+        try {
+          assertParticipantCapacity(
+            resource.capacity,
+            participants,
+            bookedUser.email
+          );
+        } catch (error) {
+          if (error instanceof ParticipantInputError) {
+            throw new ReservationRequestError(error.message, 400);
+          }
+
+          throw error;
         }
 
         const conflict = await tx.reservation.findFirst({
@@ -195,15 +245,78 @@ export async function POST(request: Request) {
             endTime: end,
             userId: bookedUser.id,
             resourceId,
+            participants: {
+              create: participants,
+            },
           },
-          select: { id: true },
+          select: {
+            id: true,
+            title: true,
+            startTime: true,
+            endTime: true,
+            user: { select: { name: true } },
+            resource: { select: { name: true, location: true } },
+            participants: { select: { name: true, email: true } },
+          },
         });
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
 
+    let notified = 0;
+    let notifyFailed = false;
+
+    if (notifyParticipants && reservation.participants.length > 0) {
+      if (!isMailConfigured()) {
+        notifyFailed = true;
+      } else {
+        const whenLabel = formatBookingWindow(
+          reservation.startTime,
+          reservation.endTime,
+          timeZone
+        );
+
+        const results = await Promise.allSettled(
+          reservation.participants.map((person) =>
+            sendParticipantNotice({
+              to: person.email,
+              name: person.name,
+              bookerName: reservation.user.name,
+              resourceName: reservation.resource.name,
+              location: reservation.resource.location,
+              title: reservation.title,
+              whenLabel,
+            })
+          )
+        );
+
+        notified = results.filter((result) => result.status === "fulfilled").length;
+        notifyFailed = notified !== reservation.participants.length;
+      }
+    }
+
+    const others = reservation.participants.length;
+    let message = "Reservation booked.";
+
+    if (others > 0) {
+      message =
+        others === 1
+          ? "Reservation booked with 1 other person."
+          : `Reservation booked with ${others} other people.`;
+
+      if (notifyParticipants && notified === others) {
+        message += " They were emailed about this time.";
+      } else if (notifyParticipants && notified > 0) {
+        message +=
+          " The booking is saved, but some email notices could not be sent.";
+      } else if (notifyParticipants && notifyFailed) {
+        message +=
+          " The booking is saved, but the email notice could not be sent.";
+      }
+    }
+
     return NextResponse.json(
-      { id: reservation.id, message: "Reservation booked." },
+      { id: reservation.id, message },
       { status: 201 }
     );
   } catch (error) {

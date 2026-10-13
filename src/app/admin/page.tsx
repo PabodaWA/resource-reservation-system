@@ -103,6 +103,13 @@ async function ProtectedAdmin() {
             location: true,
           },
         },
+        participants: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            name: true,
+            email: true,
+          },
+        },
       },
     }),
   ]);
@@ -145,6 +152,7 @@ async function ProtectedAdmin() {
       resourceName: item.resource.name,
       resourceType: item.resource.type,
       resourceLocation: item.resource.location,
+      participants: item.participants,
     })),
   };
 

@@ -83,6 +83,13 @@ async function ProtectedDashboard() {
             location: true,
           },
         },
+        participants: {
+          orderBy: { createdAt: "asc" },
+          select: {
+            name: true,
+            email: true,
+          },
+        },
       },
     }),
     prisma.reservation.groupBy({
@@ -139,6 +146,7 @@ async function ProtectedDashboard() {
       resourceName: reservation.resource.name,
       resourceType: reservation.resource.type,
       resourceLocation: reservation.resource.location,
+      participants: reservation.participants,
     })),
     occupiedSlots: occupied.map((slot) => ({
       resourceId: slot.resourceId,

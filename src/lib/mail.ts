@@ -29,9 +29,7 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
-export async function sendTemporaryPasswordEmail(
-  input: TemporaryPasswordEmail
-): Promise<void> {
+function createTransporter() {
   const host = readEnv("SMTP_HOST");
   const user = readEnv("SMTP_USER");
   const pass = readEnv("SMTP_PASS");
@@ -46,12 +44,70 @@ export async function sendTemporaryPasswordEmail(
     throw new Error("SMTP_PORT is invalid.");
   }
 
-  const transporter = nodemailer.createTransport({
-    host,
-    port,
-    secure: port === 465,
-    auth: { user, pass },
+  return {
+    from,
+    transporter: nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    }),
+  };
+}
+
+type ParticipantNoticeEmail = {
+  to: string;
+  name: string;
+  bookerName: string;
+  resourceName: string;
+  location: string;
+  title: string;
+  whenLabel: string;
+};
+
+export async function sendParticipantNotice(
+  input: ParticipantNoticeEmail
+): Promise<void> {
+  const { from, transporter } = createTransporter();
+  const safeName = escapeHtml(input.name);
+  const safeBooker = escapeHtml(input.bookerName);
+  const safeResource = escapeHtml(input.resourceName);
+  const safeLocation = escapeHtml(input.location);
+  const safeTitle = escapeHtml(input.title);
+  const safeWhen = escapeHtml(input.whenLabel);
+
+  await transporter.sendMail({
+    from,
+    to: input.to,
+    subject: `${input.bookerName} included you in a resource booking`,
+    text: [
+      `Hello ${input.name},`,
+      "",
+      `${input.bookerName} booked ${input.resourceName} and included you.`,
+      "",
+      `Title: ${input.title}`,
+      `When: ${input.whenLabel}`,
+      `Where: ${input.location}`,
+      "",
+      "You do not need to sign in or reply. This note is only to tell you the resource is reserved for that time.",
+    ].join("\n"),
+    html: `
+      <p>Hello ${safeName},</p>
+      <p>${safeBooker} booked <strong>${safeResource}</strong> and included you.</p>
+      <p>
+        <strong>Title:</strong> ${safeTitle}<br />
+        <strong>When:</strong> ${safeWhen}<br />
+        <strong>Where:</strong> ${safeLocation}
+      </p>
+      <p>You do not need to sign in or reply. This note is only to tell you the resource is reserved for that time.</p>
+    `,
   });
+}
+
+export async function sendTemporaryPasswordEmail(
+  input: TemporaryPasswordEmail
+): Promise<void> {
+  const { from, transporter } = createTransporter();
 
   const safeName = escapeHtml(input.name);
   const safeEmail = escapeHtml(input.to);
