@@ -9,6 +9,12 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import {
+  ParticipantInputError,
+  assertParticipantCapacity,
+  minimumPartySize,
+  parseParticipants,
+} from "@/lib/reservation-participants";
 
 export type UserDashboardData = {
   user: {
@@ -38,6 +44,10 @@ export type UserDashboardData = {
     resourceName: string;
     resourceType: string;
     resourceLocation: string;
+    participants: {
+      name: string;
+      email: string;
+    }[];
   }[];
   occupiedSlots: {
     resourceId: string;
@@ -86,6 +96,17 @@ const emptyBooking = {
   endClock: "",
 };
 
+type ParticipantDraft = {
+  name: string;
+  email: string;
+};
+
+function emptyParty(capacity: number): ParticipantDraft[] {
+  const others = Math.max(minimumPartySize(capacity) - 1, 0);
+
+  return Array.from({ length: others }, () => ({ name: "", email: "" }));
+}
+
 function formatClockLabel(clock: string) {
   const [hours, minutes] = clock.split(":").map(Number);
   return new Intl.DateTimeFormat("en-US", {
@@ -119,6 +140,8 @@ export default function DashboardClient({
     ...emptyBooking,
     ...defaultSlot(),
   }));
+  const [participants, setParticipants] = useState<ParticipantDraft[]>([]);
+  const [notifyParticipants, setNotifyParticipants] = useState(true);
   const [showBooking, setShowBooking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cancellingId, setCancellingId] = useState("");
@@ -202,7 +225,12 @@ export default function DashboardClient({
         return (
           reservation.title.toLowerCase().includes(term) ||
           reservation.resourceName.toLowerCase().includes(term) ||
-          reservation.resourceLocation.toLowerCase().includes(term)
+          reservation.resourceLocation.toLowerCase().includes(term) ||
+          reservation.participants.some(
+            (person) =>
+              person.name.toLowerCase().includes(term) ||
+              person.email.toLowerCase().includes(term)
+          )
         );
       })
       .sort((a, b) => {
@@ -239,6 +267,8 @@ export default function DashboardClient({
     setSection("book");
     setSearch("");
     setSuccess("");
+    setParticipants(free ? emptyParty(picked?.capacity ?? 1) : []);
+    setNotifyParticipants(true);
     setShowBooking(free);
     setBooking({
       ...emptyBooking,
@@ -300,8 +330,14 @@ export default function DashboardClient({
       return;
     }
 
+    const pickedResource = data.resources.find(
+      (resource) => resource.id === resourceId
+    );
+
     setError("");
     setSuccess("");
+    setParticipants(emptyParty(pickedResource?.capacity ?? 1));
+    setNotifyParticipants(true);
     setBooking((current) => ({
       ...current,
       resourceId,
@@ -364,6 +400,32 @@ export default function DashboardClient({
 
     const start = resolved.window.start;
     const end = resolved.window.end;
+    const bookedResource = data.resources.find(
+      (resource) => resource.id === booking.resourceId
+    );
+
+    if (!bookedResource) {
+      setError("Choose a resource to book.");
+      return;
+    }
+
+    let filledPeople: { name: string; email: string }[];
+
+    try {
+      filledPeople = parseParticipants(participants);
+      assertParticipantCapacity(
+        bookedResource.capacity,
+        filledPeople,
+        data.user.email
+      );
+    } catch (error) {
+      if (error instanceof ParticipantInputError) {
+        setError(error.message);
+        return;
+      }
+
+      throw error;
+    }
 
     setSaving(true);
 
@@ -377,6 +439,12 @@ export default function DashboardClient({
           purpose: booking.purpose,
           startTime: start.toISOString(),
           endTime: end.toISOString(),
+          participants: filledPeople.map((person) => ({
+            name: person.name.trim().replace(/\s+/g, " "),
+            email: person.email.trim().toLowerCase(),
+          })),
+          notifyParticipants: notifyParticipants && filledPeople.length > 0,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
 
@@ -387,6 +455,8 @@ export default function DashboardClient({
       }
 
       setBooking({ ...emptyBooking, ...defaultSlot() });
+      setParticipants([]);
+      setNotifyParticipants(true);
       setShowBooking(false);
       setSearch("");
       setFilter("upcoming");
@@ -897,7 +967,7 @@ export default function DashboardClient({
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
                 <form
                   onSubmit={handleBook}
-                  className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+                  className="max-h-[min(90vh,760px)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div>
@@ -963,6 +1033,20 @@ export default function DashboardClient({
                         className={inputClass}
                       />
                     </FormField>
+                    {selectedResource.capacity <= 1 ? (
+                      <p className="text-sm text-slate-500">
+                        This resource fits one person, so the booking is only
+                        for you.
+                      </p>
+                    ) : (
+                      <ParticipantFields
+                        capacity={selectedResource.capacity}
+                        participants={participants}
+                        notify={notifyParticipants}
+                        onChange={setParticipants}
+                        onNotifyChange={setNotifyParticipants}
+                      />
+                    )}
                   </div>
 
                   <div className="mt-6 flex flex-wrap justify-end gap-3">
@@ -1382,6 +1466,12 @@ function ReservationRow({
         <p className="mt-1 text-xs text-slate-500">
           {formatRange(reservation.startTime, reservation.endTime)}
         </p>
+        {reservation.participants.length > 0 && (
+          <p className="mt-2 text-sm text-slate-500">
+            With{" "}
+            {reservation.participants.map((person) => person.name).join(", ")}
+          </p>
+        )}
         {reservation.purpose && (
           <p className="mt-2 text-sm text-slate-500">{reservation.purpose}</p>
         )}
@@ -1474,6 +1564,119 @@ function EmptyState({
         >
           {actionLabel}
         </button>
+      )}
+    </div>
+  );
+}
+
+function ParticipantFields({
+  capacity,
+  participants,
+  notify,
+  onChange,
+  onNotifyChange,
+}: {
+  capacity: number;
+  participants: ParticipantDraft[];
+  notify: boolean;
+  onChange: (next: ParticipantDraft[]) => void;
+  onNotifyChange: (next: boolean) => void;
+}) {
+  const extraSeats = capacity - 1;
+  const minimum = minimumPartySize(capacity);
+  const filled = participants.filter(
+    (person) => person.name.trim() && person.email.trim()
+  ).length;
+  const partySize = filled + 1;
+  const hasPerson = participants.some(
+    (person) => person.name.trim() || person.email.trim()
+  );
+
+  function updatePerson(index: number, patch: Partial<ParticipantDraft>) {
+    onChange(
+      participants.map((person, personIndex) =>
+        personIndex === index ? { ...person, ...patch } : person
+      )
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-sm font-semibold text-slate-700">
+          People joining you
+        </p>
+        <p className="mt-1 text-xs leading-5 text-slate-500">
+          You count as 1. At least {minimum} of {capacity} seats must be
+          filled (70%, rounded up). Add {minimum - 1} or more people, up to{" "}
+          {extraSeats}.
+        </p>
+        <p
+          className={`text-xs font-semibold ${
+            partySize >= minimum ? "text-emerald-700" : "text-amber-700"
+          }`}
+        >
+          {partySize} of {capacity} seats filled. At least {minimum} are required.
+        </p>
+      </div>
+      {participants.map((person, index) => (
+        <div key={index} className="flex flex-col gap-2 sm:flex-row sm:items-start">
+          <input
+            maxLength={80}
+            value={person.name}
+            onChange={(event) =>
+              updatePerson(index, { name: event.target.value })
+            }
+            placeholder="Name"
+            aria-label={`Person ${index + 1} name`}
+            className={inputClass}
+          />
+          <input
+            type="email"
+            maxLength={254}
+            value={person.email}
+            onChange={(event) =>
+              updatePerson(index, { email: event.target.value })
+            }
+            placeholder="Email"
+            aria-label={`Person ${index + 1} email`}
+            className={inputClass}
+          />
+          <button
+            type="button"
+            onClick={() =>
+              onChange(participants.filter((_, personIndex) => personIndex !== index))
+            }
+            className="mt-1 rounded-lg px-3 py-2 text-slate-500 hover:bg-slate-100"
+            aria-label={`Remove person ${index + 1}`}
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      {participants.length < extraSeats && (
+        <button
+          type="button"
+          onClick={() =>
+            onChange([...participants, { name: "", email: "" }])
+          }
+          className="rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          Add a person
+        </button>
+      )}
+      {hasPerson && (
+        <label className="flex items-start gap-3 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={notify}
+            onChange={(event) => onNotifyChange(event.target.checked)}
+            className="mt-1"
+          />
+          <span>
+            Email them that this resource is reserved for this time.
+          </span>
+        </label>
       )}
     </div>
   );

@@ -41,6 +41,10 @@ export type AdminDashboardData = {
     resourceName: string;
     resourceType: string;
     resourceLocation: string;
+    participants: {
+      name: string;
+      email: string;
+    }[];
   }[];
 };
 
@@ -190,7 +194,12 @@ export default function AdminDashboardClient({
         reservation.title.toLowerCase().includes(term) ||
         reservation.userName.toLowerCase().includes(term) ||
         reservation.userEmail.toLowerCase().includes(term) ||
-        reservation.resourceName.toLowerCase().includes(term)
+        reservation.resourceName.toLowerCase().includes(term) ||
+        reservation.participants.some(
+          (person) =>
+            person.name.toLowerCase().includes(term) ||
+            person.email.toLowerCase().includes(term)
+        )
       );
     });
   }, [data.reservations, reservationFilter, reservationSearch]);
@@ -1097,6 +1106,14 @@ export default function AdminDashboardClient({
                                   reservation.endTime
                                 )}
                               </p>
+                              {reservation.participants.length > 0 && (
+                                <p className="mt-2 text-sm text-slate-500">
+                                  With{" "}
+                                  {reservation.participants
+                                    .map((person) => person.name)
+                                    .join(", ")}
+                                </p>
+                              )}
                               {reservation.purpose && (
                                 <p className="mt-2 text-sm text-slate-500">
                                   {reservation.purpose}
