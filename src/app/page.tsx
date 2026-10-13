@@ -66,7 +66,21 @@ async function ProtectedDashboard() {
       },
     }),
     prisma.reservation.findMany({
-      where: { userId: user.id },
+      where: {
+        OR: [
+          { userId: user.id },
+          {
+            participants: {
+              some: {
+                email: {
+                  equals: user.email.trim().toLowerCase(),
+                  mode: "insensitive",
+                },
+              },
+            },
+          },
+        ],
+      },
       orderBy: { startTime: "desc" },
       select: {
         id: true,
@@ -76,6 +90,12 @@ async function ProtectedDashboard() {
         endTime: true,
         status: true,
         resourceId: true,
+        user: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
         resource: {
           select: {
             name: true,
@@ -146,6 +166,8 @@ async function ProtectedDashboard() {
       resourceName: reservation.resource.name,
       resourceType: reservation.resource.type,
       resourceLocation: reservation.resource.location,
+      invited: reservation.user.id !== user.id,
+      bookedByName: reservation.user.name,
       participants: reservation.participants,
     })),
     occupiedSlots: occupied.map((slot) => ({

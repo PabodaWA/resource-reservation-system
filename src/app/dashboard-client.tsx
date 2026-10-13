@@ -44,6 +44,8 @@ export type UserDashboardData = {
     resourceName: string;
     resourceType: string;
     resourceLocation: string;
+    invited: boolean;
+    bookedByName: string;
     participants: {
       name: string;
       email: string;
@@ -226,6 +228,7 @@ export default function DashboardClient({
           reservation.title.toLowerCase().includes(term) ||
           reservation.resourceName.toLowerCase().includes(term) ||
           reservation.resourceLocation.toLowerCase().includes(term) ||
+          reservation.bookedByName.toLowerCase().includes(term) ||
           reservation.participants.some(
             (person) =>
               person.name.toLowerCase().includes(term) ||
@@ -673,9 +676,7 @@ export default function DashboardClient({
                     </h2>
                     <p className="mt-3 max-w-lg text-sm leading-6 text-indigo-100 sm:text-base">
                       {nextReservation
-                        ? nextReservation.timing === "in_progress"
-                          ? `${nextReservation.title} is happening now in ${nextReservation.resourceName}.`
-                          : `Next up: ${nextReservation.title} in ${nextReservation.resourceName}.`
+                        ? welcomeLine(nextReservation)
                         : "You have no upcoming bookings. Reserve a room, desk, or piece of equipment when you need it."}
                     </p>
                     <div className="mt-6 flex flex-wrap gap-3">
@@ -735,7 +736,7 @@ export default function DashboardClient({
                       <div>
                         <h2 className="text-lg font-bold">Upcoming bookings</h2>
                         <p className="mt-1 text-sm text-slate-500">
-                          Your next confirmed reservations.
+                          Meetings you booked and ones you were added to.
                         </p>
                       </div>
                       <button
@@ -763,6 +764,7 @@ export default function DashboardClient({
                           <ReservationRow
                             key={reservation.id}
                             reservation={reservation}
+                            viewerEmail={data.user.email}
                             cancelling={cancellingId === reservation.id}
                             onCancel={() => void handleCancel(reservation)}
                           />
@@ -1082,8 +1084,8 @@ export default function DashboardClient({
                     <div>
                       <h2 className="text-lg font-bold">My reservations</h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        Upcoming, completed, and cancelled bookings on your
-                        account.
+                        Bookings you made, plus meetings other people added you
+                        to.
                       </p>
                     </div>
                     <input
@@ -1138,6 +1140,7 @@ export default function DashboardClient({
                       <ReservationRow
                         key={reservation.id}
                         reservation={reservation}
+                        viewerEmail={data.user.email}
                         cancelling={cancellingId === reservation.id}
                         onCancel={() => void handleCancel(reservation)}
                       />
@@ -1440,17 +1443,38 @@ function ClockIcon() {
   );
 }
 
+function welcomeLine(reservation: Reservation) {
+  const place = `${reservation.title} in ${reservation.resourceName}`;
+  const added = reservation.invited
+    ? ` ${reservation.bookedByName} added you.`
+    : "";
+
+  if (reservation.timing === "in_progress") {
+    return `${place} is happening now.${added}`;
+  }
+
+  return `Next up: ${place}.${added}`;
+}
+
 function ReservationRow({
   reservation,
+  viewerEmail,
   cancelling,
   onCancel,
 }: {
   reservation: Reservation;
+  viewerEmail: string;
   cancelling: boolean;
   onCancel: () => void;
 }) {
   const canCancel =
-    reservation.status === "CONFIRMED" && reservation.timing !== "past";
+    !reservation.invited &&
+    reservation.status === "CONFIRMED" &&
+    reservation.timing !== "past";
+  const viewer = viewerEmail.trim().toLowerCase();
+  const others = reservation.participants.filter(
+    (person) => person.email !== viewer
+  );
 
   return (
     <li className="flex flex-col gap-4 rounded-2xl border border-slate-100 p-4 sm:flex-row sm:items-center">
@@ -1459,6 +1483,9 @@ function ReservationRow({
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-semibold text-slate-900">{reservation.title}</p>
           <StatusBadge reservation={reservation} />
+          {reservation.invited && (
+            <Badge className="bg-violet-50 text-violet-700">Added you</Badge>
+          )}
         </div>
         <p className="mt-1 text-sm text-slate-600">
           {reservation.resourceName} · {reservation.resourceLocation}
@@ -1466,10 +1493,14 @@ function ReservationRow({
         <p className="mt-1 text-xs text-slate-500">
           {formatRange(reservation.startTime, reservation.endTime)}
         </p>
-        {reservation.participants.length > 0 && (
+        {reservation.invited && (
           <p className="mt-2 text-sm text-slate-500">
-            With{" "}
-            {reservation.participants.map((person) => person.name).join(", ")}
+            Booked by {reservation.bookedByName}
+          </p>
+        )}
+        {others.length > 0 && (
+          <p className="mt-2 text-sm text-slate-500">
+            With {others.map((person) => person.name).join(", ")}
           </p>
         )}
         {reservation.purpose && (
