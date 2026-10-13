@@ -1,9 +1,26 @@
-
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import DashboardClient from "./dashboard-client";
+import DashboardClient, {
+  type UserDashboardData,
+} from "./dashboard-client";
+
+export const metadata = {
+  title: "My Dashboard | ReserveFlow",
+};
+
+function timingOf(start: Date, end: Date, now: Date) {
+  if (end.getTime() <= now.getTime()) {
+    return "past" as const;
+  }
+
+  if (start.getTime() <= now.getTime()) {
+    return "in_progress" as const;
+  }
+
+  return "upcoming" as const;
+}
 
 async function ProtectedDashboard() {
   const sessionUser = await getSessionUser();
@@ -15,6 +32,10 @@ async function ProtectedDashboard() {
   const user = await prisma.user.findUnique({
     where: { id: sessionUser.id },
     select: {
+      id: true,
+      name: true,
+      email: true,
+      role: true,
       isActive: true,
       mustChangePassword: true,
     },
@@ -28,17 +49,95 @@ async function ProtectedDashboard() {
     redirect("/change-password");
   }
 
-  return <DashboardClient />;
+  const now = new Date();
+
+  const [resources, reservations, upcomingSlots] = await Promise.all([
+    prisma.resource.findMany({
+      where: { status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        location: true,
+        capacity: true,
+        description: true,
+      },
+    }),
+    prisma.reservation.findMany({
+      where: { userId: user.id },
+      orderBy: { startTime: "desc" },
+      select: {
+        id: true,
+        title: true,
+        purpose: true,
+        startTime: true,
+        endTime: true,
+        status: true,
+        resourceId: true,
+        resource: {
+          select: {
+            name: true,
+            type: true,
+            location: true,
+          },
+        },
+      },
+    }),
+    prisma.reservation.groupBy({
+      by: ["resourceId"],
+      where: {
+        status: "CONFIRMED",
+        endTime: { gt: now },
+      },
+      _count: { _all: true },
+    }),
+  ]);
+
+  const upcomingByResource = new Map(
+    upcomingSlots.map((slot) => [slot.resourceId, slot._count._all])
+  );
+
+  const data: UserDashboardData = {
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+    resources: resources.map((resource) => ({
+      id: resource.id,
+      name: resource.name,
+      type: resource.type,
+      location: resource.location,
+      capacity: resource.capacity,
+      description: resource.description,
+      upcomingBookings: upcomingByResource.get(resource.id) ?? 0,
+    })),
+    reservations: reservations.map((reservation) => ({
+      id: reservation.id,
+      title: reservation.title,
+      purpose: reservation.purpose,
+      startTime: reservation.startTime.toISOString(),
+      endTime: reservation.endTime.toISOString(),
+      status: reservation.status,
+      timing: timingOf(reservation.startTime, reservation.endTime, now),
+      resourceId: reservation.resourceId,
+      resourceName: reservation.resource.name,
+      resourceType: reservation.resource.type,
+      resourceLocation: reservation.resource.location,
+    })),
+  };
+
+  return <DashboardClient data={data} />;
 }
 
-export default function Home() {
+export default function UserDashboardPage() {
   return (
     <Suspense
       fallback={
         <main className="flex min-h-screen items-center justify-center bg-slate-50">
-          <p className="text-sm text-slate-600">
-            Loading your dashboard...
-          </p>
+          <p className="text-sm text-slate-600">Loading your dashboard...</p>
         </main>
       }
     >
