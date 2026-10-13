@@ -70,6 +70,11 @@ const emptyForm = {
   description: "",
 };
 
+const emptyUserForm = {
+  name: "",
+  email: "",
+};
+
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
 
@@ -87,6 +92,9 @@ export default function AdminDashboardClient({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [form, setForm] = useState(emptyForm);
+  const [showUserForm, setShowUserForm] = useState(false);
+  const [userForm, setUserForm] = useState(emptyUserForm);
+  const [temporaryPassword, setTemporaryPassword] = useState("");
 
   const firstName = data.admin.name.trim().split(/\s+/)[0] || "Admin";
   const activeRatio = data.stats.totalResources
@@ -106,6 +114,16 @@ export default function AdminDashboardClient({
     setError("");
     setSuccess("");
     setShowForm(true);
+  }
+
+  function openAddUser() {
+    setSection("users");
+    setSearch("");
+    setError("");
+    setSuccess("");
+    setTemporaryPassword("");
+    setUserForm(emptyUserForm);
+    setShowUserForm(true);
   }
 
   async function handleLogout() {
@@ -164,6 +182,56 @@ export default function AdminDashboardClient({
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setSuccess("");
+    setTemporaryPassword("");
+
+    setSaving(true);
+
+    try {
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: userForm.name.trim(),
+          email: userForm.email.trim().toLowerCase(),
+        }),
+      });
+
+      const payload: {
+        message?: string;
+        temporaryPassword?: string;
+      } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to create the user.");
+      }
+
+      if (!payload.temporaryPassword) {
+        throw new Error(
+          "User created, but the temporary password was not returned."
+        );
+      }
+
+      setTemporaryPassword(payload.temporaryPassword);
+      setUserForm(emptyUserForm);
+      setShowUserForm(false);
+      setSuccess("User created successfully.");
+
+      router.refresh();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Something went wrong."
+      );
     } finally {
       setSaving(false);
     }
@@ -374,6 +442,38 @@ export default function AdminDashboardClient({
               </div>
             )}
 
+            {temporaryPassword && (
+              <section
+                aria-label="Temporary password"
+                className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4"
+              >
+                <h2 className="font-semibold text-amber-900">
+                  Temporary password
+                </h2>
+
+                <p className="mt-1 text-sm text-amber-800">
+                  Copy this password and provide it securely to the new member.
+                  It will not be shown again after leaving this page or refreshing.
+                </p>
+
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <code className="break-all rounded-lg bg-white px-3 py-2 text-sm text-slate-800">
+                    {temporaryPassword}
+                  </code>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(temporaryPassword);
+                    }}
+                    className="rounded-lg border border-amber-300 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Copy password
+                  </button>
+                </div>
+              </section>
+            )}
+
             {section === "overview" && (
               <>
                 <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-indigo-700 to-violet-600 p-6 text-white shadow-sm sm:p-9">
@@ -562,15 +662,109 @@ export default function AdminDashboardClient({
             )}
 
             {section === "users" && (
-              <DataPanel
-                title="All users"
-                detail="Accounts that can sign in to ReserveFlow."
-                search={search}
-                onSearch={setSearch}
-                searchLabel="Search users"
-                placeholder="Search by name, email, or role..."
-                footer={`Showing ${filteredUsers.length} of ${data.users.length} users`}
-              >
+              <>
+                {showUserForm && (
+                  <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7">
+                    <div className="mb-6 flex items-start justify-between gap-4">
+                      <div>
+                        <h2 className="text-lg font-bold">Add a user</h2>
+                        <p className="mt-1 text-sm text-slate-500">
+                          Create a new member account.
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowUserForm(false)}
+                        className="rounded-lg px-3 py-2 text-slate-500 hover:bg-slate-100"
+                        aria-label="Close form"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <form onSubmit={handleCreateUser} className="space-y-5">
+                      <div className="grid gap-5 sm:grid-cols-2">
+                        <FormField label="Full name">
+                          <input
+                            required
+                            maxLength={120}
+                            autoComplete="name"
+                            value={userForm.name}
+                            onChange={(event) =>
+                              setUserForm({
+                                ...userForm,
+                                name: event.target.value,
+                              })
+                            }
+                            placeholder="Enter full name"
+                            className={inputClass}
+                          />
+                        </FormField>
+
+                        <FormField label="Email address">
+                          <input
+                            required
+                            type="email"
+                            maxLength={254}
+                            autoComplete="email"
+                            value={userForm.email}
+                            onChange={(event) =>
+                              setUserForm({
+                                ...userForm,
+                                email: event.target.value,
+                              })
+                            }
+                            placeholder="member@example.com"
+                            className={inputClass}
+                          />
+                        </FormField>
+                      </div>
+
+                      <p className="text-sm text-slate-500">
+                        A temporary password will be generated. The new member
+                        must change it after signing in.
+                      </p>
+
+                      <div className="flex justify-end gap-3 border-t border-slate-100 pt-5">
+                        <button
+                          type="button"
+                          onClick={() => setShowUserForm(false)}
+                          className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Cancel
+                        </button>
+
+                        <button
+                          type="submit"
+                          disabled={saving}
+                          className="rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {saving ? "Creating..." : "Create user"}
+                        </button>
+                      </div>
+                    </form>
+                  </section>
+                )}
+
+                <DataPanel
+                  title="All users"
+                  detail="Accounts that can sign in to ReserveFlow."
+                  search={search}
+                  onSearch={setSearch}
+                  searchLabel="Search users"
+                  placeholder="Search by name, email, or role..."
+                  footer={`Showing ${filteredUsers.length} of ${data.users.length} users`}
+                  extra={
+                    <button
+                      type="button"
+                      onClick={openAddUser}
+                      className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                    >
+                      + Add user
+                    </button>
+                  }
+                >
                 {filteredUsers.length === 0 ? (
                   <EmptyState
                     icon="◉"
@@ -641,7 +835,8 @@ export default function AdminDashboardClient({
                     </table>
                   </div>
                 )}
-              </DataPanel>
+                </DataPanel>
+              </>
             )}
 
             {section === "resources" && (
