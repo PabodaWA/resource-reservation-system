@@ -1,29 +1,18 @@
 
 import "server-only";
 
-import { SignJWT, jwtVerify } from "jose";
+import { SignJWT } from "jose";
 import { cookies } from "next/headers";
+import {
+  getSecretKey,
+  SESSION_COOKIE_NAME,
+  verifySessionToken,
+  type SessionUser,
+} from "@/lib/session-token";
 
-const SESSION_COOKIE_NAME = "reserveflow_session";
 const SESSION_DURATION = 60 * 60 * 24 * 7;
 
-function getSecretKey() {
-  const secret = process.env.AUTH_SECRET;
-
-  if (!secret || secret.length < 32) {
-    throw new Error(
-      "AUTH_SECRET must be configured with at least 32 characters."
-    );
-  }
-
-  return new TextEncoder().encode(secret);
-}
-
-export type SessionUser = {
-  id: string;
-  email: string;
-  role: "ADMIN" | "MEMBER";
-};
+export type { SessionUser };
 
 export async function createSession(user: SessionUser) {
   const token = await new SignJWT({
@@ -55,27 +44,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     return null;
   }
 
-  try {
-    const { payload } = await jwtVerify(token, getSecretKey(), {
-      algorithms: ["HS256"],
-    });
-
-    if (
-      typeof payload.sub !== "string" ||
-      typeof payload.email !== "string" ||
-      (payload.role !== "ADMIN" && payload.role !== "MEMBER")
-    ) {
-      return null;
-    }
-
-    return {
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
-    };
-  } catch {
-    return null;
-  }
+  return verifySessionToken(token);
 }
 
 export async function deleteSession() {
