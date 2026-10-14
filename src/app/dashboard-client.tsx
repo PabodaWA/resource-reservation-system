@@ -517,8 +517,10 @@ export default function DashboardClient({
             <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-xl font-bold text-white">
               R
             </div>
-            <div>
-              <p className="text-xl font-bold tracking-tight">ReserveFlow</p>
+            <div className="min-w-0">
+              <p className="text-sm font-bold leading-snug tracking-tight">
+                Ruhunu ResourceHub
+              </p>
               <p className="text-xs text-slate-500">Your bookings</p>
             </div>
           </a>
@@ -1148,7 +1150,7 @@ export default function DashboardClient({
             )}
 
             <footer className="pb-2 text-center text-xs text-slate-400">
-              ReserveFlow · Your reservations
+              Ruhunu ResourceHub · Your reservations
             </footer>
           </div>
         </main>

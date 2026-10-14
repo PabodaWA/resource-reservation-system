@@ -7,7 +7,7 @@ import DashboardClient, {
 } from "./dashboard-client";
 
 export const metadata = {
-  title: "My Dashboard | ReserveFlow",
+  title: "My Dashboard | Ruhunu ResourceHub",
 };
 
 function timingOf(start: Date, end: Date, now: Date) {

@@ -7,7 +7,7 @@ import AdminDashboardClient, {
 } from "./admin-dashboard-client";
 
 export const metadata = {
-  title: "Admin Dashboard | ReserveFlow",
+  title: "Admin Dashboard | Ruhunu ResourceHub",
 };
 
 function timingOf(start: Date, end: Date, now: Date) {

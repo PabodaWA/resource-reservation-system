@@ -84,7 +84,7 @@ export default function ChangePasswordPage() {
 
           <p className="mt-3 text-sm leading-6 text-slate-600">
             For your account security, set a new password before
-            continuing to ReserveFlow.
+            continuing to Ruhunu ResourceHub.
           </p>
         </div>
 
@@ -193,7 +193,7 @@ export default function ChangePasswordPage() {
         </form>
 
         <p className="mt-6 text-center text-xs text-slate-500">
-          ReserveFlow · Resource Reservation Management System
+          Ruhunu ResourceHub · Resource Reservation Management System
         </p>
       </section>
     </main>

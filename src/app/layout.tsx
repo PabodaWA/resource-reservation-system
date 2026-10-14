@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ReserveFlow | Resource Reservation Management",
+  title: "Ruhunu ResourceHub | Resource Reservation Management",
   description:
-    "Manage shared resources and reservations with ReserveFlow.",
+    "Manage shared resources and reservations with Ruhunu ResourceHub.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

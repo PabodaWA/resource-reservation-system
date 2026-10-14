@@ -120,11 +120,11 @@ export async function sendTemporaryPasswordEmail(
   await transporter.sendMail({
     from,
     to: input.to,
-    subject: "Your ReserveFlow temporary password",
+    subject: "Your Ruhunu ResourceHub temporary password",
     text: [
       `Hello ${input.name},`,
       "",
-      "An administrator created a ReserveFlow account for you.",
+      "An administrator created a Ruhunu ResourceHub account for you.",
       "",
       `Sign-in email: ${input.to}`,
       `Temporary password: ${input.temporaryPassword}`,
@@ -136,13 +136,13 @@ export async function sendTemporaryPasswordEmail(
     ].join("\n"),
     html: `
       <p>Hello ${safeName},</p>
-      <p>An administrator created a ReserveFlow account for you.</p>
+      <p>An administrator created a Ruhunu ResourceHub account for you.</p>
       <p>
         <strong>Sign-in email:</strong> ${safeEmail}<br />
         <strong>Temporary password:</strong> ${safePassword}
       </p>
       <p>
-        <a href="${safeLoginUrl}">Sign in to ReserveFlow</a>
+        <a href="${safeLoginUrl}">Sign in to Ruhunu ResourceHub</a>
         and choose a new password.
       </p>
       <p>If you did not expect this email, contact your administrator.</p>
