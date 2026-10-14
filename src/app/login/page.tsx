@@ -1,4 +1,3 @@
-
 "use client";
 
 import { useState } from "react";
@@ -9,14 +8,15 @@ export default function LoginPage() {
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  async function handleSubmit(
-    event: React.FormEvent<HTMLFormElement>
-  ) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setNotice("");
     setIsLoading(true);
 
     try {
@@ -28,6 +28,7 @@ export default function LoginPage() {
         body: JSON.stringify({
           email: email.trim(),
           password,
+          rememberMe,
         }),
       });
 
@@ -57,96 +58,154 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="relative flex min-h-screen items-center overflow-hidden bg-[#fbf8fd]">
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute -top-28 -left-24 h-80 w-80 rounded-full bg-[#eadcf8]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute top-[18%] -left-20 h-44 w-96 rotate-[-18deg] rounded-[50%] bg-[#f3e7fb]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute right-[-12%] bottom-[-22%] h-[460px] w-[560px] rounded-[46%] bg-[#e8d6f6]"
-      />
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute top-[12%] right-[6%] h-52 w-80 rotate-12 rounded-[48%] bg-[#f6eefb]"
-      />
+    <div className="flex min-h-screen w-full bg-white font-sans text-slate-900">
+      <div className="relative hidden overflow-hidden lg:block lg:w-5/12">
+        <img
+          src="/bg3.png"
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover object-center"
+        />
+      </div>
 
-      <div className="relative z-10 grid w-full items-center gap-4 px-6 py-10 lg:grid-cols-2 lg:px-14 xl:px-20">
-        <div className="flex items-center justify-center">
-          <img
-            src="/loginbackground.jpg"
-            alt="Team planning shared resources on a reservation dashboard"
-            className="h-auto w-full max-w-xl object-contain"
-          />
-        </div>
+      <div className="flex w-full items-center justify-center bg-white p-6 sm:p-12 lg:w-7/12">
+        <div className="w-full max-w-xl space-y-8">
+          <div className="flex items-center gap-3">
+            <div className="flex h-14 w-14 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 text-3xl font-bold text-white shadow-lg shadow-sky-500/20">
+              R
+            </div>
+            <span className="text-3xl font-bold tracking-tight">
+              ReserveFlow{" "}
+              <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-base font-semibold text-sky-600">
+                Workspace
+              </span>
+            </span>
+          </div>
 
-        <div className="flex items-center justify-center">
-          <form
-            onSubmit={handleSubmit}
-            className="w-full max-w-xs space-y-4"
-          >
-            <h1 className="pb-2 text-center text-[1.7rem] font-bold tracking-[0.22em] text-[#6d28d9]">
-              WELCOME!
-            </h1>
+          <div>
+            <h2 className="text-5xl font-bold tracking-tight text-slate-900">
+              Sign in to portal
+            </h2>
+            <p className="mt-3 text-lg text-slate-500">
+              Welcome back. Enter the email and password for your account.
+            </p>
+          </div>
 
+          <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="email" className="sr-only">
-                Email
+              <label
+                htmlFor="email"
+                className="mb-2 block text-base font-bold tracking-wider text-slate-700 uppercase"
+              >
+                Work email address
               </label>
               <input
                 id="email"
                 type="email"
+                required
                 autoComplete="username"
-                placeholder="Email"
                 value={email}
                 onChange={(event) => setEmail(event.target.value)}
-                required
+                placeholder="name@company.com"
                 disabled={isLoading}
-                className="w-full rounded-full border border-[#d8c4ea] bg-white px-5 py-3 text-[15px] text-[#3d2463] outline-none transition placeholder:text-[#b7a4c8] focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/15 disabled:bg-[#faf7fc]"
+                className="w-full rounded-xl border border-slate-200 px-5 py-4 text-lg transition-all outline-none focus:border-transparent focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="sr-only">
-                Password
-              </label>
+              <div className="mb-2 flex items-center justify-between">
+                <label
+                  htmlFor="password"
+                  className="block text-base font-bold tracking-wider text-slate-700 uppercase"
+                >
+                  Password
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError("");
+                    setNotice(
+                      "Password reset is handled by an administrator."
+                    );
+                  }}
+                  className="text-base font-semibold text-sky-600 transition-colors hover:text-sky-700"
+                >
+                  Forgot password?
+                </button>
+              </div>
               <input
                 id="password"
                 type="password"
+                required
                 autoComplete="current-password"
-                placeholder="Password"
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                required
+                placeholder="••••••••"
                 disabled={isLoading}
-                className="w-full rounded-full border border-[#d8c4ea] bg-white px-5 py-3 text-[15px] text-[#3d2463] outline-none transition placeholder:text-[#b7a4c8] focus:border-[#8b5cf6] focus:ring-4 focus:ring-[#8b5cf6]/15 disabled:bg-[#faf7fc]"
+                className="w-full rounded-xl border border-slate-200 px-5 py-4 text-lg transition-all outline-none focus:border-transparent focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
               />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <label className="flex cursor-pointer items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(event) => setRememberMe(event.target.checked)}
+                  disabled={isLoading}
+                  className="h-5 w-5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                />
+                <span className="text-lg font-medium text-slate-600">
+                  Remember this device
+                </span>
+              </label>
             </div>
 
             {error && (
               <p
                 role="alert"
-                aria-live="polite"
-                className="rounded-2xl bg-red-50 px-4 py-3 text-center text-sm text-red-700"
+                className="rounded-xl bg-red-50 px-4 py-3 text-lg text-red-700"
               >
                 {error}
+              </p>
+            )}
+
+            {notice && (
+              <p
+                role="status"
+                className="rounded-xl bg-sky-50 px-4 py-3 text-lg text-sky-800"
+              >
+                {notice}
               </p>
             )}
 
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full rounded-full bg-[#7c3aed] px-5 py-3 text-[15px] font-semibold text-white shadow-[0_8px_20px_rgba(124,58,237,0.28)] transition hover:bg-[#6d28d9] focus:outline-none focus:ring-2 focus:ring-[#8b5cf6] focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-xl bg-sky-500 py-4 text-lg font-semibold text-white shadow-md shadow-sky-500/20 transition-all duration-200 hover:bg-sky-600 hover:shadow-lg hover:shadow-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {isLoading ? "Signing in..." : "Sign in"}
+              {isLoading ? "Signing in..." : "Sign in to portal"}
             </button>
           </form>
+
+          <div className="flex items-center justify-center gap-2 border-t border-slate-100 pt-4 text-base text-slate-400">
+            <svg
+              className="h-5 w-5 text-emerald-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+              />
+            </svg>
+            <span>Sign in with your ReserveFlow account</span>
+          </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
