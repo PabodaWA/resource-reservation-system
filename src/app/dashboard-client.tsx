@@ -10,6 +10,17 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  clockFromInstant,
+  endClocksForStart,
+  instantFromClock,
+  latestBookableEnd,
+  startClocksForDay,
+  suggestClocks,
+  validateBookingWindow,
+  visibleBookings,
+  type BookingInterval,
+} from "@/lib/booking-window";
+import {
   ParticipantInputError,
   assertParticipantCapacity,
   minimumPartySize,
@@ -110,24 +121,16 @@ function emptyParty(capacity: number): ParticipantDraft[] {
 }
 
 function formatClockLabel(clock: string) {
-  const [hours, minutes] = clock.split(":").map(Number);
-  return new Intl.DateTimeFormat("en-US", {
+  const [rawHours, minutes] = clock.split(":").map(Number);
+  const dayOffset = Math.floor(rawHours / 24);
+  const hours = rawHours % 24;
+  const label = new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(2026, 0, 1, hours, minutes, 0, 0));
+
+  return dayOffset > 0 ? `${label} next day` : label;
 }
-
-const timeChoices = Array.from({ length: 24 * 4 }, (_, index) => {
-  const hours = Math.floor(index / 4);
-  const minutes = (index % 4) * 15;
-  const value = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
-
-  return { value, label: formatClockLabel(value) };
-});
-
-const MIN_DURATION_MS = 15 * 60 * 1000;
-const MAX_DURATION_MS = 12 * 60 * 60 * 1000;
-const MAX_LEAD_MS = 90 * 24 * 60 * 60 * 1000;
 
 export default function DashboardClient({
   data,
@@ -140,7 +143,7 @@ export default function DashboardClient({
   const [search, setSearch] = useState("");
   const [booking, setBooking] = useState(() => ({
     ...emptyBooking,
-    ...defaultSlot(),
+    date: toDateInput(new Date()),
   }));
   const [participants, setParticipants] = useState<ParticipantDraft[]>([]);
   const [notifyParticipants, setNotifyParticipants] = useState(true);
@@ -171,10 +174,89 @@ export default function DashboardClient({
       reservation.status === "CONFIRMED" && reservation.timing === "past"
   ).length;
 
-  const slot = useMemo(
-    () => resolveSlot(booking.date, booking.startClock, booking.endClock),
-    [booking.date, booking.startClock, booking.endClock]
+  const resourceBookings = useMemo(
+    () => intervalsForResource(booking.resourceId, data.occupiedSlots),
+    [booking.resourceId, data.occupiedSlots]
   );
+
+  const dayStart = booking.date ? combineLocal(booking.date, "00:00") : null;
+
+  const slot = useMemo(() => {
+    if (
+      !booking.date ||
+      !booking.resourceId ||
+      !booking.startClock ||
+      !booking.endClock
+    ) {
+      return {
+        window: null as { start: Date; end: Date } | null,
+        error: "",
+      };
+    }
+
+    const startOfSelectedDay = combineLocal(booking.date, "00:00");
+    const start = instantFromClock(startOfSelectedDay, booking.startClock);
+    const end = instantFromClock(startOfSelectedDay, booking.endClock);
+    const check = validateBookingWindow({
+      start,
+      end,
+      bookings: resourceBookings,
+      now: Date.now(),
+    });
+
+    if (!check.ok) {
+      return { window: null, error: check.error };
+    }
+
+    return { window: { start, end }, error: "" };
+  }, [
+    booking.date,
+    booking.endClock,
+    booking.resourceId,
+    booking.startClock,
+    resourceBookings,
+  ]);
+
+  const startOptions =
+    dayStart && booking.resourceId
+      ? startClocksForDay({
+          dayStart,
+          bookings: resourceBookings,
+          now: Date.now(),
+        })
+      : [];
+
+  const endOptions =
+    dayStart && booking.startClock
+      ? endClocksForStart({
+          dayStart,
+          start: instantFromClock(dayStart, booking.startClock),
+          bookings: resourceBookings,
+        })
+      : [];
+
+  const selectedStart =
+    dayStart && booking.startClock
+      ? instantFromClock(dayStart, booking.startClock)
+      : null;
+
+  const bookedRanges =
+    dayStart && booking.resourceId
+      ? visibleBookings({
+          dayStart,
+          start: selectedStart,
+          bookings: resourceBookings,
+        })
+      : [];
+
+  const bookingCap =
+    selectedStart &&
+    !Number.isNaN(selectedStart.getTime()) &&
+    startOptions.some(
+      (choice) => choice.clock === booking.startClock && choice.available
+    )
+      ? latestBookableEnd(selectedStart, resourceBookings)
+      : null;
 
   const categories = useMemo(() => {
     const present = new Set(data.resources.map((resource) => resource.type));
@@ -186,19 +268,15 @@ export default function DashboardClient({
     return [...known, ...extra];
   }, [data.resources]);
 
-  const availableResources = useMemo(() => {
-    if (!slot.window) {
-      return [];
-    }
-
+  const categoryResources = useMemo(() => {
     return data.resources.filter((resource) => {
       if (booking.category && resource.type !== booking.category) {
         return false;
       }
 
-      return isResourceFree(resource.id, slot.window!, data.occupiedSlots);
+      return true;
     });
-  }, [booking.category, data.occupiedSlots, data.resources, slot.window]);
+  }, [booking.category, data.resources]);
 
   const visibleReservations = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -255,57 +333,31 @@ export default function DashboardClient({
   }
 
   function openBooking(resourceId = "") {
-    const nextSlot = defaultSlot();
-    const resolved = resolveSlot(
-      nextSlot.date,
-      nextSlot.startClock,
-      nextSlot.endClock
-    );
     const picked = data.resources.find((resource) => resource.id === resourceId);
-    const free =
-      Boolean(resourceId) &&
-      resolved.window !== null &&
-      isResourceFree(resourceId, resolved.window, data.occupiedSlots);
+    const date = toDateInput(new Date());
+    const suggested = resourceId
+      ? suggestClocks({
+          dayStart: combineLocal(date, "00:00"),
+          bookings: intervalsForResource(resourceId, data.occupiedSlots),
+          now: Date.now(),
+        })
+      : { startClock: "", endClock: "", error: "" };
 
     setSection("book");
     setSearch("");
     setSuccess("");
-    setParticipants(free ? emptyParty(picked?.capacity ?? 1) : []);
+    setParticipants(resourceId ? emptyParty(picked?.capacity ?? 1) : []);
     setNotifyParticipants(true);
-    setShowBooking(free);
+    setShowBooking(Boolean(resourceId));
     setBooking({
       ...emptyBooking,
-      ...nextSlot,
+      date,
+      startClock: suggested.startClock,
+      endClock: suggested.endClock,
       category: picked?.type ?? "",
-      resourceId: free ? resourceId : "",
+      resourceId,
     });
-    setError(
-      resourceId && !free
-        ? "That resource is already booked for the next open time. Change the date or time, or pick another resource."
-        : ""
-    );
-  }
-
-  function updateSlot(patch: Partial<Pick<typeof booking, "date" | "startClock" | "endClock">>) {
-    const next = { ...booking, ...patch };
-    const resolved = resolveSlot(next.date, next.startClock, next.endClock);
-    const stillFree =
-      Boolean(next.resourceId) &&
-      resolved.window !== null &&
-      isResourceFree(next.resourceId, resolved.window, data.occupiedSlots);
-
-    if (next.resourceId && !stillFree) {
-      setShowBooking(false);
-      setBooking({ ...next, resourceId: "" });
-      setError(
-        resolved.window
-          ? "That resource is not free for the selected time."
-          : ""
-      );
-      return;
-    }
-
-    setBooking(next);
+    setError(resourceId ? suggested.error : "");
   }
 
   function updateCategory(category: string) {
@@ -315,35 +367,85 @@ export default function DashboardClient({
 
     if (selected && category && selected.type !== category) {
       setShowBooking(false);
-      setBooking({ ...booking, category, resourceId: "" });
+      setParticipants([]);
+      setBooking({ ...booking, category, resourceId: "", startClock: "", endClock: "" });
+      setError("");
       return;
     }
 
     setBooking({ ...booking, category });
   }
 
+  function applySuggestedTime(
+    date: string,
+    resourceId: string,
+    preferredStart?: string,
+    preferredEnd?: string
+  ) {
+    return suggestClocks({
+      dayStart: combineLocal(date, "00:00"),
+      bookings: intervalsForResource(resourceId, data.occupiedSlots),
+      now: Date.now(),
+      preferredStart,
+      preferredEnd,
+    });
+  }
+
+  function updateDate(date: string) {
+    const suggested = applySuggestedTime(
+      date,
+      booking.resourceId,
+      booking.startClock,
+      booking.endClock
+    );
+
+    setBooking({
+      ...booking,
+      date,
+      startClock: suggested.startClock,
+      endClock: suggested.endClock,
+    });
+    setError(suggested.error);
+  }
+
+  function updateStart(startClock: string) {
+    const suggested = applySuggestedTime(
+      booking.date,
+      booking.resourceId,
+      startClock,
+      booking.endClock
+    );
+
+    setBooking({
+      ...booking,
+      startClock: suggested.startClock,
+      endClock: suggested.endClock,
+    });
+    setError(suggested.error);
+  }
+
+  function updateEnd(endClock: string) {
+    setBooking({ ...booking, endClock });
+    setError("");
+  }
+
   function chooseResource(resourceId: string) {
-    if (!slot.window) {
-      setError(slot.error || "Choose a valid date and time first.");
-      return;
-    }
-
-    if (!isResourceFree(resourceId, slot.window, data.occupiedSlots)) {
-      setError("That resource is already booked for the selected time.");
-      return;
-    }
-
     const pickedResource = data.resources.find(
       (resource) => resource.id === resourceId
     );
+    const date = booking.date || toDateInput(new Date());
+    const suggested = applySuggestedTime(date, resourceId);
 
-    setError("");
+    setError(suggested.error);
     setSuccess("");
     setParticipants(emptyParty(pickedResource?.capacity ?? 1));
     setNotifyParticipants(true);
     setBooking((current) => ({
       ...current,
+      date,
       resourceId,
+      startClock: suggested.startClock,
+      endClock: suggested.endClock,
       title: current.resourceId === resourceId ? current.title : "",
       purpose: current.resourceId === resourceId ? current.purpose : "",
     }));
@@ -377,32 +479,13 @@ export default function DashboardClient({
       return;
     }
 
-    const resolved = resolveSlot(
-      booking.date,
-      booking.startClock,
-      booking.endClock
-    );
-
-    if (!resolved.window) {
-      setError(resolved.error || "Choose a valid date and time.");
+    if (!slot.window) {
+      setError(slot.error || "Choose a valid date and time.");
       return;
     }
 
-    if (
-      !isResourceFree(
-        booking.resourceId,
-        resolved.window,
-        data.occupiedSlots
-      )
-    ) {
-      setShowBooking(false);
-      setBooking((current) => ({ ...current, resourceId: "" }));
-      setError("That resource is already booked for the selected time.");
-      return;
-    }
-
-    const start = resolved.window.start;
-    const end = resolved.window.end;
+    const start = slot.window.start;
+    const end = slot.window.end;
     const bookedResource = data.resources.find(
       (resource) => resource.id === booking.resourceId
     );
@@ -457,7 +540,7 @@ export default function DashboardClient({
         throw new Error(payload.message || "Unable to book that resource.");
       }
 
-      setBooking({ ...emptyBooking, ...defaultSlot() });
+      setBooking({ ...emptyBooking, date: toDateInput(new Date()) });
       setParticipants([]);
       setNotifyParticipants(true);
       setShowBooking(false);
@@ -639,7 +722,7 @@ export default function DashboardClient({
           </header>
 
           <div className="mx-auto max-w-7xl space-y-8 p-5 sm:p-8">
-            {error && (
+            {error && !showBooking && (
               <div
                 role="alert"
                 className="flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -840,115 +923,45 @@ export default function DashboardClient({
 
                     <div className="my-5 h-px bg-white/25" />
 
-                    <BookingDateField
-                      value={booking.date}
-                      onChange={(date) => updateSlot({ date })}
-                    />
-
-                    <div className="my-5 h-px bg-white/25" />
-
-                    <div>
-                      <p className="text-sm text-slate-200">Time</p>
-                      <div className="mt-2 flex items-center gap-2 rounded-md bg-white px-3 py-1.5 text-slate-800">
-                        <select
-                          required
-                          value={booking.startClock}
-                          onChange={(event) =>
-                            updateSlot({ startClock: event.target.value })
-                          }
-                          aria-label="Start time"
-                          className="min-w-0 flex-1 appearance-none bg-transparent py-1 text-sm font-medium outline-none"
-                        >
-                          {timeChoices.map((choice) => (
-                            <option key={`start-${choice.value}`} value={choice.value}>
-                              {choice.label}
-                            </option>
-                          ))}
-                        </select>
-                        <span className="text-slate-400">–</span>
-                        <select
-                          required
-                          value={booking.endClock}
-                          onChange={(event) =>
-                            updateSlot({ endClock: event.target.value })
-                          }
-                          aria-label="End time"
-                          className="min-w-0 flex-1 appearance-none bg-transparent py-1 text-sm font-medium outline-none"
-                        >
-                          {timeChoices.map((choice) => (
-                            <option key={`end-${choice.value}`} value={choice.value}>
-                              {choice.label}
-                            </option>
-                          ))}
-                        </select>
-                        <ClockIcon />
-                      </div>
-                      {slot.window && (
-                        <p className="mt-2 text-xs text-slate-300">
-                          {formatDuration(
-                            slot.window.end.getTime() - slot.window.start.getTime()
-                          )}
-                          {booking.endClock <= booking.startClock
-                            ? " · ends the next day"
-                            : ""}
-                        </p>
-                      )}
-                      {slot.error && (
-                        <p className="mt-3 text-xs leading-5 text-amber-200">
-                          {slot.error}
-                        </p>
-                      )}
-                    </div>
+                    <ol className="space-y-3 text-sm leading-6 text-slate-200">
+                      <li>1. Choose a category.</li>
+                      <li>2. Select a resource.</li>
+                      <li>
+                        3. Pick a date and time. Booked times are shown and
+                        cannot be selected. You can book for up to 12 hours, or
+                        until the next booking starts.
+                      </li>
+                    </ol>
                   </aside>
 
                   <div className="min-w-0 flex-1 p-5 sm:p-6">
                     <h2 className="text-base font-medium text-slate-800">
-                      Select an available resource:
+                      Select a resource:
                     </h2>
                     <p className="mt-1 text-sm text-slate-500">
-                      {slot.window
-                        ? availableResources.length === 1
-                          ? "1 resource available"
-                          : `${availableResources.length} resources available`
-                        : "Choose a valid date and time"}
+                      {booking.category
+                        ? `${labelType(booking.category)} · ${categoryResources.length}`
+                        : categoryResources.length === 1
+                          ? "1 resource"
+                          : `${categoryResources.length} resources`}
                     </p>
 
-                    {!slot.window ? (
-                      <EmptyState
-                        title="Pick a date and time"
-                        detail={
-                          slot.error ||
-                          "Set when you need the resource. Only free ones will be shown."
-                        }
-                      />
-                    ) : availableResources.length === 0 ? (
+                    {categoryResources.length === 0 ? (
                       <EmptyState
                         title={
                           data.resources.length === 0
                             ? "No resources available"
-                            : booking.category &&
-                                !data.resources.some(
-                                  (resource) => resource.type === booking.category
-                                )
-                              ? "No resources in this category"
-                              : "Nothing is free for this time"
+                            : "No resources in this category"
                         }
                         detail={
                           data.resources.length === 0
                             ? "Ask an administrator to add a resource you can book."
-                            : booking.category &&
-                                !data.resources.some(
-                                  (resource) => resource.type === booking.category
-                                )
-                              ? "Choose another category, or ask an administrator to add one."
-                              : booking.category
-                                ? `No ${labelType(booking.category).toLowerCase()} is free then. Try another time or category.`
-                                : "Every resource is already booked then. Try another date or time."
+                            : "Choose another category, or ask an administrator to add one."
                         }
                       />
                     ) : (
                       <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-                        {availableResources.map((resource) => (
+                        {categoryResources.map((resource) => (
                           <ResourceCard
                             key={resource.id}
                             resource={resource}
@@ -977,24 +990,27 @@ export default function DashboardClient({
                         Book {selectedResource.name}
                       </h2>
                       <p className="mt-1 text-sm text-slate-500">
-                        {formatBookingDate(booking.date)} · {booking.startClock}{" "}
-                        – {booking.endClock}
-                        {booking.endClock <= booking.startClock
-                          ? " (next day)"
-                          : ""}
-                      </p>
-                      <p className="mt-1 text-sm text-slate-500">
                         {labelType(selectedResource.type)} · Capacity{" "}
                         {selectedResource.capacity} · {selectedResource.location}
                       </p>
+                      {slot.window && (
+                        <p className="mt-1 text-sm text-slate-500">
+                          {formatBookingDate(booking.date)} ·{" "}
+                          {formatClockLabel(booking.startClock)} –{" "}
+                          {formatClockLabel(booking.endClock)}
+                        </p>
+                      )}
                     </div>
                     <button
                       type="button"
                       onClick={() => {
                         setShowBooking(false);
+                        setError("");
                         setBooking((current) => ({
                           ...current,
                           resourceId: "",
+                          startClock: "",
+                          endClock: "",
                         }));
                       }}
                       className="rounded-lg px-3 py-2 text-slate-500 hover:bg-slate-100"
@@ -1005,10 +1021,108 @@ export default function DashboardClient({
                   </div>
 
                   <div className="mt-5 space-y-4">
+                    <BookingDateField
+                      variant="form"
+                      value={booking.date}
+                      onChange={updateDate}
+                    />
+
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                        Already booked
+                      </p>
+                      {bookedRanges.length === 0 ? (
+                        <p className="mt-2 text-sm text-amber-950">
+                          Nothing is booked in this window.
+                        </p>
+                      ) : (
+                        <ul className="mt-2 space-y-2">
+                          {bookedRanges.map((range) => (
+                            <li
+                              key={`${range.start.toISOString()}-${range.end.toISOString()}`}
+                              className="flex items-center justify-between gap-3 rounded-lg bg-white px-3 py-2 text-sm"
+                            >
+                              <span className="font-medium text-slate-800">
+                                {formatRange(
+                                  range.start.toISOString(),
+                                  range.end.toISOString()
+                                )}
+                              </span>
+                              <span className="shrink-0 text-xs font-semibold text-red-600">
+                                Unavailable
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-semibold text-slate-700">Time</p>
+                      <div className="mt-2 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                        <select
+                          required
+                          value={booking.startClock}
+                          onChange={(event) => updateStart(event.target.value)}
+                          aria-label="Start time"
+                          className={inputClass}
+                        >
+                          {!startOptions.some(
+                            (choice) => choice.clock === booking.startClock
+                          ) && <option value="">No open time</option>}
+                          {startOptions.map((choice) => (
+                            <option
+                              key={`start-${choice.clock}`}
+                              value={choice.clock}
+                              disabled={!choice.available}
+                            >
+                              {formatClockLabel(choice.clock)}
+                              {choice.reason === "booked" ? " · Booked" : ""}
+                            </option>
+                          ))}
+                        </select>
+                        <span className="text-slate-400">–</span>
+                        <select
+                          required
+                          value={booking.endClock}
+                          onChange={(event) => updateEnd(event.target.value)}
+                          aria-label="End time"
+                          className={inputClass}
+                        >
+                          {endOptions.length === 0 && (
+                            <option value="">No end time</option>
+                          )}
+                          {endOptions.map((choice) => (
+                            <option key={`end-${choice.clock}`} value={choice.clock}>
+                              {formatClockLabel(choice.clock)}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      {bookingCap && (
+                        <p className="mt-2 text-xs leading-5 text-slate-500">
+                          {capIsBooking(bookingCap, resourceBookings)
+                            ? `You can book until ${formatInstantOnDay(bookingCap, booking.date)}. Another booking starts then.`
+                            : `You can book for up to 12 hours, until ${formatInstantOnDay(bookingCap, booking.date)}.`}
+                          {slot.window
+                            ? ` Selected: ${formatDuration(slot.window.end.getTime() - slot.window.start.getTime())}.`
+                            : ""}
+                        </p>
+                      )}
+                    </div>
+
+                    {(error || slot.error) && (
+                      <p
+                        role="alert"
+                        className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+                      >
+                        {error || slot.error}
+                      </p>
+                    )}
+
                     <FormField label="Title">
                       <input
                         required
-                        autoFocus
                         maxLength={120}
                         value={booking.title}
                         onChange={(event) =>
@@ -1056,9 +1170,12 @@ export default function DashboardClient({
                       type="button"
                       onClick={() => {
                         setShowBooking(false);
+                        setError("");
                         setBooking((current) => ({
                           ...current,
                           resourceId: "",
+                          startClock: "",
+                          endClock: "",
                         }));
                       }}
                       className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
@@ -1067,7 +1184,7 @@ export default function DashboardClient({
                     </button>
                     <button
                       type="submit"
-                      disabled={saving}
+                      disabled={saving || !slot.window}
                       className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       {saving ? "Booking..." : "Confirm booking"}
@@ -1194,19 +1311,48 @@ function ResourceCard({
 function BookingDateField({
   value,
   onChange,
+  variant = "panel",
 }: {
   value: string;
   onChange: (date: string) => void;
+  variant?: "panel" | "form";
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [popupStyle, setPopupStyle] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
   const selected = value ? combineLocal(value, "12:00") : null;
   const [month, setMonth] = useState(() => monthStart(selected ?? new Date()));
+
+  function placePopup() {
+    const rect = buttonRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return;
+    }
+
+    const width = Math.max(rect.width, 280);
+    const popupHeight = 340;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const top =
+      spaceBelow < popupHeight && rect.top > popupHeight
+        ? rect.top - popupHeight - 8
+        : rect.bottom + 8;
+    const left = Math.min(Math.max(8, rect.left), window.innerWidth - width - 8);
+
+    setPopupStyle({ top, left, width });
+  }
 
   useEffect(() => {
     if (!open) {
       return;
     }
+
+    placePopup();
 
     function onPointerDown(event: MouseEvent) {
       if (!rootRef.current?.contains(event.target as Node)) {
@@ -1222,9 +1368,13 @@ function BookingDateField({
 
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
+    window.addEventListener("resize", placePopup);
+    window.addEventListener("scroll", placePopup, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("resize", placePopup);
+      window.removeEventListener("scroll", placePopup, true);
     };
   }, [open]);
 
@@ -1238,8 +1388,17 @@ function BookingDateField({
 
   return (
     <div ref={rootRef} className="relative">
-      <p className="text-sm text-slate-200">Date</p>
+      <p
+        className={
+          variant === "form"
+            ? "text-sm font-semibold text-slate-700"
+            : "text-sm text-slate-200"
+        }
+      >
+        Date
+      </p>
       <button
+        ref={buttonRef}
         type="button"
         aria-expanded={open}
         aria-label="Choose a date from the calendar"
@@ -1249,9 +1408,11 @@ function BookingDateField({
           }
           setOpen((current) => !current);
         }}
-        className={`mt-2 flex w-full items-center gap-3 rounded-lg bg-white px-3 py-2 text-left text-slate-800 ${
-          open ? "ring-2 ring-blue-300" : ""
-        }`}
+        className={`mt-2 flex w-full items-center gap-3 bg-white text-left text-slate-800 ${
+          variant === "form"
+            ? "rounded-xl border border-slate-200 px-4 py-3"
+            : "rounded-lg px-3 py-2"
+        } ${open ? "ring-2 ring-blue-300" : ""}`}
       >
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold">
@@ -1266,8 +1427,15 @@ function BookingDateField({
         </span>
       </button>
 
-      {open && (
-        <div className="absolute left-0 right-0 top-full z-30 mt-2 rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-xl">
+      {open && popupStyle && (
+        <div
+          className="fixed z-[70] rounded-xl border border-slate-200 bg-white p-3 text-slate-800 shadow-xl"
+          style={{
+            top: popupStyle.top,
+            left: popupStyle.left,
+            width: popupStyle.width,
+          }}
+        >
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
@@ -1425,22 +1593,6 @@ function dateSummary(value: string) {
   }
 
   return { title, detail: "Past date" };
-}
-
-function ClockIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      className="h-5 w-5 shrink-0 text-blue-600"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-    >
-      <circle cx="12" cy="12" r="8" />
-      <path d="M12 8v4.5l3 2" />
-    </svg>
-  );
 }
 
 function welcomeLine(reservation: Reservation) {
@@ -1784,84 +1936,34 @@ function labelType(type: string) {
   );
 }
 
-function defaultSlot() {
-  const start = new Date();
-  start.setSeconds(0, 0);
-  const remainder = start.getMinutes() % 30;
-  start.setMinutes(start.getMinutes() + (remainder === 0 ? 30 : 30 - remainder));
-  const end = new Date(start.getTime() + 30 * 60 * 1000);
-
-  return {
-    date: toDateInput(start),
-    startClock: toClockInput(start),
-    endClock: toClockInput(end),
-  };
-}
-
-function resolveSlot(date: string, startClock: string, endClock: string) {
-  if (!date || !startClock || !endClock) {
-    return {
-      window: null as { start: Date; end: Date } | null,
-      error: "Choose a date and a start and end time.",
-    };
-  }
-
-  const start = combineLocal(date, startClock);
-  let end = combineLocal(date, endClock);
-
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return {
-      window: null,
-      error: "Choose a valid date and time.",
-    };
-  }
-
-  if (end.getTime() <= start.getTime()) {
-    end = addDays(end, 1);
-  }
-
-  const duration = end.getTime() - start.getTime();
-
-  if (duration < MIN_DURATION_MS || duration > MAX_DURATION_MS) {
-    return {
-      window: null,
-      error: "A booking must last between 15 minutes and 12 hours.",
-    };
-  }
-
-  const now = Date.now();
-
-  if (start.getTime() < now - 60 * 1000) {
-    return {
-      window: null,
-      error: "Start time cannot be in the past.",
-    };
-  }
-
-  if (start.getTime() > now + MAX_LEAD_MS) {
-    return {
-      window: null,
-      error: "Bookings can be made up to 90 days ahead.",
-    };
-  }
-
-  return { window: { start, end }, error: "" };
-}
-
-function isResourceFree(
+function intervalsForResource(
   resourceId: string,
-  window: { start: Date; end: Date },
   slots: UserDashboardData["occupiedSlots"]
-) {
-  return !slots.some((slot) => {
-    if (slot.resourceId !== resourceId) {
-      return false;
-    }
+): BookingInterval[] {
+  if (!resourceId) {
+    return [];
+  }
 
-    const start = new Date(slot.startTime);
-    const end = new Date(slot.endTime);
-    return start < window.end && end > window.start;
-  });
+  return slots
+    .filter((slot) => slot.resourceId === resourceId)
+    .map((slot) => ({
+      start: new Date(slot.startTime),
+      end: new Date(slot.endTime),
+    }))
+    .filter(
+      (slot) =>
+        !Number.isNaN(slot.start.getTime()) &&
+        !Number.isNaN(slot.end.getTime()) &&
+        slot.end.getTime() > slot.start.getTime()
+    );
+}
+
+function capIsBooking(cap: Date, bookings: BookingInterval[]) {
+  return bookings.some((booking) => booking.start.getTime() === cap.getTime());
+}
+
+function formatInstantOnDay(date: Date, day: string) {
+  return formatClockLabel(clockFromInstant(date, combineLocal(day, "00:00")));
 }
 
 function combineLocal(date: string, time: string) {
@@ -1873,11 +1975,6 @@ function combineLocal(date: string, time: string) {
 function toDateInput(date: Date) {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-function toClockInput(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function addDays(date: Date, days: number) {
