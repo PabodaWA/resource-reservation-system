@@ -78,6 +78,7 @@ async function ProtectedAdmin() {
         description: true,
         status: true,
         createdAt: true,
+        updatedAt: true,
       },
     }),
     prisma.reservation.findMany({
@@ -89,6 +90,8 @@ async function ProtectedAdmin() {
         startTime: true,
         endTime: true,
         status: true,
+        createdAt: true,
+        updatedAt: true,
         resourceId: true,
         user: {
           select: {
@@ -137,6 +140,7 @@ async function ProtectedAdmin() {
       description: item.description,
       status: item.status,
       createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
     })),
     reservations: reservations.map((item) => ({
       id: item.id,
@@ -145,6 +149,8 @@ async function ProtectedAdmin() {
       startTime: item.startTime.toISOString(),
       endTime: item.endTime.toISOString(),
       status: item.status,
+      createdAt: item.createdAt.toISOString(),
+      updatedAt: item.updatedAt.toISOString(),
       timing: timingOf(item.startTime, item.endTime, now),
       resourceId: item.resourceId,
       userName: item.user.name,
@@ -163,7 +169,7 @@ export default function AdminPage() {
   return (
     <Suspense
       fallback={
-        <main className="flex min-h-screen items-center justify-center bg-slate-50">
+        <main className="flex min-h-screen items-center justify-center bg-[#F4F7FB]">
           <p className="text-sm text-slate-600">Loading admin workspace...</p>
         </main>
       }
