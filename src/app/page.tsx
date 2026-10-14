@@ -75,6 +75,8 @@ async function ProtectedDashboard() {
         startTime: true,
         endTime: true,
         status: true,
+        createdAt: true,
+        updatedAt: true,
         resourceId: true,
         resource: {
           select: {
@@ -95,14 +97,14 @@ async function ProtectedDashboard() {
     prisma.reservation.groupBy({
       by: ["resourceId"],
       where: {
-        status: "CONFIRMED",
+        status: { in: ["CONFIRMED", "PENDING"] },
         endTime: { gt: now },
       },
       _count: { _all: true },
     }),
     prisma.reservation.findMany({
       where: {
-        status: "CONFIRMED",
+        status: { in: ["CONFIRMED", "PENDING"] },
         endTime: { gt: now },
         startTime: { lt: horizon },
       },
@@ -141,6 +143,8 @@ async function ProtectedDashboard() {
       startTime: reservation.startTime.toISOString(),
       endTime: reservation.endTime.toISOString(),
       status: reservation.status,
+      createdAt: reservation.createdAt.toISOString(),
+      updatedAt: reservation.updatedAt.toISOString(),
       timing: timingOf(reservation.startTime, reservation.endTime, now),
       resourceId: reservation.resourceId,
       resourceName: reservation.resource.name,

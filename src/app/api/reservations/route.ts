@@ -3,6 +3,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { isMailConfigured, sendParticipantNotice } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/require-auth";
+import { needsAdminApproval } from "@/lib/office-hours";
 import {
   ParticipantInputError,
   assertParticipantCapacity,
@@ -220,7 +221,7 @@ export async function POST(request: Request) {
         const conflict = await tx.reservation.findFirst({
           where: {
             resourceId,
-            status: "CONFIRMED",
+            status: { in: ["CONFIRMED", "PENDING"] },
             startTime: { lt: end },
             endTime: { gt: start },
           },
@@ -243,6 +244,9 @@ export async function POST(request: Request) {
                 : null,
             startTime: start,
             endTime: end,
+            status: needsAdminApproval(start, end, timeZone)
+              ? "PENDING"
+              : "CONFIRMED",
             userId: bookedUser.id,
             resourceId,
             participants: {
@@ -252,6 +256,7 @@ export async function POST(request: Request) {
           select: {
             id: true,
             title: true,
+            status: true,
             startTime: true,
             endTime: true,
             user: { select: { name: true } },
@@ -263,10 +268,15 @@ export async function POST(request: Request) {
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
 
+    const awaitingApproval = reservation.status === "PENDING";
     let notified = 0;
     let notifyFailed = false;
 
-    if (notifyParticipants && reservation.participants.length > 0) {
+    if (
+      !awaitingApproval &&
+      notifyParticipants &&
+      reservation.participants.length > 0
+    ) {
       if (!isMailConfigured()) {
         notifyFailed = true;
       } else {
@@ -296,9 +306,11 @@ export async function POST(request: Request) {
     }
 
     const others = reservation.participants.length;
-    let message = "Reservation booked.";
+    let message = awaitingApproval
+      ? "This time is outside office hours (8:00 AM–8:00 PM), so the booking is waiting for an administrator to approve it."
+      : "Reservation booked.";
 
-    if (others > 0) {
+    if (!awaitingApproval && others > 0) {
       message =
         others === 1
           ? "Reservation booked with 1 other person."
