@@ -74,9 +74,11 @@ export default function ChangePasswordPage() {
     <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4 py-10">
       <section className="w-full max-w-md rounded-2xl bg-white p-8 shadow-lg">
         <div className="mb-7 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl bg-blue-600 text-2xl font-bold text-white">
-            R
-          </div>
+          <img
+            src="/R%20logo.jpg"
+            alt="Ruhunu ResourceHub"
+            className="mx-auto mb-4 h-16 w-16 rounded-xl object-contain"
+          />
 
           <h1 className="text-2xl font-bold text-slate-900">
             Change Your Password

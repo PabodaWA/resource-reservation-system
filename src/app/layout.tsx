@@ -13,9 +13,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ruhunu ResourceHub | Resource Reservation Management",
+  title: "Ruhunu ResourceHub",
   description:
     "Manage shared resources and reservations with Ruhunu ResourceHub.",
+  icons: {
+    icon: [{ url: "/R%20logo.jpg", type: "image/jpeg" }],
+    apple: [{ url: "/R%20logo.jpg", type: "image/jpeg" }],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

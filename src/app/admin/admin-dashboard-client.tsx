@@ -385,9 +385,11 @@ export default function AdminDashboardClient({
             onClick={() => openSection("dashboard")}
             className="flex items-center gap-3 text-left"
           >
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-600 text-xl font-bold text-white">
-              R
-            </div>
+            <img
+              src="/R%20logo.jpg"
+              alt=""
+              className="h-11 w-11 shrink-0 rounded-xl object-contain"
+            />
             <div className="min-w-0">
               <p className="text-sm font-bold leading-snug tracking-tight">
                 Ruhunu ResourceHub
@@ -431,9 +433,11 @@ export default function AdminDashboardClient({
           <header className="border-b border-slate-200 bg-white px-5 py-5 sm:px-8">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 font-bold text-white md:hidden">
-                  R
-                </div>
+                <img
+                  src="/R%20logo.jpg"
+                  alt=""
+                  className="h-10 w-10 shrink-0 rounded-xl object-contain md:hidden"
+                />
                 <div>
                   <p className="text-sm text-slate-500">
                     {sectionCopy[section].kicker}

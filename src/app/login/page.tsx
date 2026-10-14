@@ -58,7 +58,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen w-full bg-white font-sans text-slate-900">
+    <div className="flex min-h-screen w-full bg-[#f4f9fc] font-sans text-slate-900">
       <div className="relative hidden overflow-hidden lg:block lg:w-5/12">
         <img
           src="/bg3.png"
@@ -67,15 +67,17 @@ export default function LoginPage() {
         />
       </div>
 
-      <div className="flex w-full items-center justify-center bg-white p-6 sm:p-12 lg:w-7/12">
+      <div className="flex w-full items-center justify-center bg-[#f4f9fc] p-6 sm:p-12 lg:w-7/12">
         <div className="w-full max-w-xl space-y-8">
           <div className="flex items-center gap-3">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 text-3xl font-bold text-white shadow-lg shadow-sky-500/20">
-              R
-            </div>
+            <img
+              src="/R%20logo.jpg"
+              alt=""
+              className="h-16 w-16 shrink-0 rounded-xl object-contain"
+            />
             <span className="text-2xl font-bold leading-tight tracking-tight sm:text-3xl">
               Ruhunu ResourceHub{" "}
-              <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-base font-semibold text-sky-600">
+              <span className="rounded-full border border-[#b7dff0] bg-[#e7f5fb] px-3 py-1 text-base font-semibold text-[#0874a8]">
                 Workspace
               </span>
             </span>
@@ -107,7 +109,7 @@ export default function LoginPage() {
                 onChange={(event) => setEmail(event.target.value)}
                 placeholder="name@company.com"
                 disabled={isLoading}
-                className="w-full rounded-xl border border-slate-200 px-5 py-4 text-lg transition-all outline-none focus:border-transparent focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
+                className="w-full rounded-xl border border-slate-200 bg-white px-5 py-4 text-lg transition-all outline-none focus:border-transparent focus:ring-2 focus:ring-[#0c8ec8] disabled:bg-slate-50"
               />
             </div>
 
@@ -127,7 +129,7 @@ export default function LoginPage() {
                       "Password reset is handled by an administrator."
                     );
                   }}
-                  className="text-base font-semibold text-sky-600 transition-colors hover:text-sky-700"
+                  className="text-base font-semibold text-[#0874a8] transition-colors hover:text-[#005888]"
                 >
                   Forgot password?
                 </button>
@@ -141,7 +143,7 @@ export default function LoginPage() {
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="••••••••"
                 disabled={isLoading}
-                className="w-full rounded-xl border border-slate-200 px-5 py-4 text-lg transition-all outline-none focus:border-transparent focus:ring-2 focus:ring-sky-500 disabled:bg-slate-50"
+                className="w-full rounded-xl border border-slate-200 bg-white px-5 py-4 text-lg transition-all outline-none focus:border-transparent focus:ring-2 focus:ring-[#0c8ec8] disabled:bg-slate-50"
               />
             </div>
 
@@ -152,7 +154,7 @@ export default function LoginPage() {
                   checked={rememberMe}
                   onChange={(event) => setRememberMe(event.target.checked)}
                   disabled={isLoading}
-                  className="h-5 w-5 rounded border-slate-300 text-sky-600 focus:ring-sky-500"
+                  className="h-5 w-5 rounded border-slate-300 text-[#0874a8] focus:ring-[#0c8ec8]"
                 />
                 <span className="text-lg font-medium text-slate-600">
                   Remember this device
@@ -172,7 +174,7 @@ export default function LoginPage() {
             {notice && (
               <p
                 role="status"
-                className="rounded-xl bg-sky-50 px-4 py-3 text-lg text-sky-800"
+                className="rounded-xl bg-[#e7f5fb] px-4 py-3 text-lg text-[#065a86]"
               >
                 {notice}
               </p>
@@ -181,7 +183,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full rounded-xl bg-sky-500 py-4 text-lg font-semibold text-white shadow-md shadow-sky-500/20 transition-all duration-200 hover:bg-sky-600 hover:shadow-lg hover:shadow-sky-500/30 disabled:cursor-not-allowed disabled:opacity-60"
+              className="w-full rounded-xl bg-[#0c8ec8] py-4 text-lg font-semibold text-white shadow-md shadow-[#0c8ec8]/20 transition-all duration-200 hover:bg-[#0874a8] hover:shadow-lg hover:shadow-[#0874a8]/30 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isLoading ? "Signing in..." : "Sign in to portal"}
             </button>
