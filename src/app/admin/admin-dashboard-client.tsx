@@ -33,7 +33,7 @@ export type AdminDashboardData = {
     purpose: string | null;
     startTime: string;
     endTime: string;
-    status: "CONFIRMED" | "CANCELLED";
+    status: "CONFIRMED" | "PENDING" | "CANCELLED";
     timing: "upcoming" | "in_progress" | "past";
     resourceId: string;
     userName: string;
@@ -49,7 +49,7 @@ export type AdminDashboardData = {
 };
 
 type Section = "dashboard" | "users" | "resources" | "reservations";
-type ReservationFilter = "upcoming" | "past" | "cancelled";
+type ReservationFilter = "upcoming" | "pending" | "past" | "cancelled";
 
 const sections: { id: Section; label: string; icon: string }[] = [
   { id: "dashboard", label: "Dashboard", icon: "▦" },
@@ -113,6 +113,7 @@ export default function AdminDashboardClient({
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
   const [savingResource, setSavingResource] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [reviewingId, setReviewingId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -122,6 +123,9 @@ export default function AdminDashboardClient({
   );
   const confirmed = data.reservations.filter(
     (reservation) => reservation.status === "CONFIRMED"
+  );
+  const pendingReservations = data.reservations.filter(
+    (reservation) => reservation.status === "PENDING"
   );
   const upcomingCount = confirmed.filter(
     (reservation) => reservation.timing !== "past"
@@ -172,7 +176,11 @@ export default function AdminDashboardClient({
     const term = reservationSearch.trim().toLowerCase();
 
     return data.reservations.filter((reservation) => {
-      if (reservationFilter === "cancelled") {
+      if (reservationFilter === "pending") {
+        if (reservation.status !== "PENDING") {
+          return false;
+        }
+      } else if (reservationFilter === "cancelled") {
         if (reservation.status !== "CANCELLED") {
           return false;
         }
@@ -208,6 +216,35 @@ export default function AdminDashboardClient({
     setError("");
     setSuccess("");
     setSection(next);
+  }
+
+  async function handleReview(
+    reservationId: string,
+    status: "CONFIRMED" | "CANCELLED"
+  ) {
+    setError("");
+    setSuccess("");
+    setReviewingId(reservationId);
+
+    try {
+      const response = await fetch(`/api/reservations/${reservationId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      const payload: { message?: string } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to update this booking.");
+      }
+
+      setSuccess(payload.message || "Booking updated.");
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setReviewingId("");
+    }
   }
 
   async function handleLogout() {
@@ -415,7 +452,12 @@ export default function AdminDashboardClient({
                 }`}
               >
                 <span>{item.icon}</span>
-                {item.label}
+                <span className="min-w-0 flex-1">{item.label}</span>
+                {item.id === "reservations" && pendingReservations.length > 0 && (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+                    {pendingReservations.length}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
@@ -425,6 +467,9 @@ export default function AdminDashboardClient({
             <p className="mt-2 text-sm leading-6 text-slate-500">
               {data.users.length} users · {data.resources.length} resources ·{" "}
               {upcomingCount} active bookings
+              {pendingReservations.length > 0
+                ? ` · ${pendingReservations.length} waiting for approval`
+                : ""}
             </p>
           </div>
         </aside>
@@ -480,6 +525,9 @@ export default function AdminDashboardClient({
                   }`}
                 >
                   {item.label}
+                  {item.id === "reservations" && pendingReservations.length > 0
+                    ? ` (${pendingReservations.length})`
+                    : ""}
                 </button>
               ))}
             </div>
@@ -1061,6 +1109,7 @@ export default function AdminDashboardClient({
                   <div className="mt-4 flex gap-2">
                     {(
                       [
+                        ["pending", `Pending (${pendingReservations.length})`],
                         ["upcoming", "Upcoming"],
                         ["past", "Past"],
                         ["cancelled", "Cancelled"],
@@ -1126,23 +1175,55 @@ export default function AdminDashboardClient({
                                 </p>
                               )}
                             </div>
-                            <Badge
-                              tone={
-                                reservation.status === "CANCELLED"
-                                  ? "muted"
-                                  : reservation.timing === "in_progress"
-                                    ? "success"
-                                    : "info"
-                              }
-                            >
-                              {reservation.status === "CANCELLED"
-                                ? "Cancelled"
-                                : reservation.timing === "in_progress"
-                                  ? "In progress"
-                                  : reservation.timing === "past"
-                                    ? "Completed"
-                                    : "Upcoming"}
-                            </Badge>
+                            <div className="flex flex-col items-end gap-2">
+                              <Badge
+                                tone={
+                                  reservation.status === "PENDING"
+                                    ? "warning"
+                                    : reservation.status === "CANCELLED"
+                                      ? "muted"
+                                      : reservation.timing === "in_progress"
+                                        ? "success"
+                                        : "info"
+                                }
+                              >
+                                {reservation.status === "PENDING"
+                                  ? "Pending approval"
+                                  : reservation.status === "CANCELLED"
+                                    ? "Cancelled"
+                                    : reservation.timing === "in_progress"
+                                      ? "In progress"
+                                      : reservation.timing === "past"
+                                        ? "Completed"
+                                        : "Upcoming"}
+                              </Badge>
+                              {reservation.status === "PENDING" && (
+                                <div className="flex gap-2">
+                                  <button
+                                    type="button"
+                                    disabled={reviewingId === reservation.id}
+                                    onClick={() =>
+                                      void handleReview(reservation.id, "CONFIRMED")
+                                    }
+                                    className="rounded-lg bg-[#3b82f6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2f74ea] disabled:opacity-60"
+                                  >
+                                    {reviewingId === reservation.id
+                                      ? "Saving..."
+                                      : "Approve"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={reviewingId === reservation.id}
+                                    onClick={() =>
+                                      void handleReview(reservation.id, "CANCELLED")
+                                    }
+                                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
                         </li>
                       ))}
@@ -1201,12 +1282,13 @@ function Badge({
   tone,
 }: {
   children: string;
-  tone: "info" | "success" | "muted";
+  tone: "info" | "success" | "muted" | "warning";
 }) {
   const tones = {
     info: "bg-indigo-50 text-indigo-700",
     success: "bg-emerald-50 text-emerald-700",
     muted: "bg-slate-100 text-slate-600",
+    warning: "bg-amber-50 text-amber-700",
   };
 
   return (

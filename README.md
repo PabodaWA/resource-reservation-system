@@ -34,3 +34,15 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+
+## Color Code
+Element	Color
+Main background	#F4F9FC
+Form card	#FFFFFF
+Sign-in button	#0C8EC8
+Button hover	#0874A8
+Input focus border	#0C8EC8
+Workspace badge	#D9EFF9 background
+Badge text and links	#0874A8
+Main text	#172B3A

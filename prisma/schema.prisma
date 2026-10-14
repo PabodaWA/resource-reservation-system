@@ -20,6 +20,7 @@ enum ResourceStatus {
 
 enum ReservationStatus {
   CONFIRMED
+  PENDING
   CANCELLED
 }
 
