@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import ForgotPasswordPanel from "./forgot-password-panel";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -13,6 +14,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,15 +88,30 @@ export default function LoginPage() {
       <div className="relative flex min-h-dvh items-center justify-end px-4 py-6 sm:px-8 lg:pr-[calc(6rem+3cm)] xl:pr-[calc(8rem+3cm)]">
         <section className="my-auto w-full max-w-[calc(520px+4cm)]">
           <div className="w-full rounded-[28px] bg-white px-9 pt-[calc(1rem+1cm)] pb-[calc(2.25rem+2cm)] shadow-[0_24px_70px_rgba(16,42,84,0.18)]">
+            {showForgotPassword ? (
+              <ForgotPasswordPanel
+                initialEmail={email}
+                onBack={() => {
+                  setShowForgotPassword(false);
+                  setError("");
+                }}
+                onComplete={(resetEmail) => {
+                  setEmail(resetEmail);
+                  setPassword("");
+                  setError("");
+                  setNotice(
+                    "Password updated. Sign in with your new password."
+                  );
+                  setShowForgotPassword(false);
+                }}
+              />
+            ) : (
+            <>
             <div>
               <h3 className="text-[2.85rem] leading-[1.05] font-bold tracking-tight text-[#10284f]">
                 Sign In To Your Account
               </h3>  
             </div>
-
-            
-
-            
 
             <form onSubmit={handleSubmit} className="mt-6 space-y-5">
               <div>
@@ -180,7 +197,8 @@ export default function LoginPage() {
                   type="button"
                   onClick={() => {
                     setError("");
-                    setNotice("Password reset is handled by an administrator.");
+                    setNotice("");
+                    setShowForgotPassword(true);
                   }}
                   className="text-[1.15rem] font-medium text-[#2f6bff] hover:text-[#1d4ed8]"
                 >
@@ -224,6 +242,8 @@ export default function LoginPage() {
                 Contact your administrator.
               </button>
             </p>
+            </>
+            )}
           </div>
         </section>
       </div>

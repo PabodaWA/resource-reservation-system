@@ -98,6 +98,9 @@ const sessionUser = auth.user;
         mustChangePassword: false,
         failedLoginAttempts: 0,
         lockedUntil: null,
+        passwordResetOtpHash: null,
+        passwordResetOtpExpiry: null,
+        passwordResetAttempts: 0,
       },
     });
 
