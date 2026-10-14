@@ -154,6 +154,8 @@ export default function DashboardClient({
   const [showBooking, setShowBooking] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cancellingId, setCancellingId] = useState("");
+  const [editingId, setEditingId] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -638,6 +640,60 @@ export default function DashboardClient({
     }
   }
 
+  function openPendingEdit(reservation: Reservation) {
+    const resource = data.resources.find(
+      (item) => item.id === reservation.resourceId
+    );
+
+    if (!resource) {
+      setError("That resource is no longer available, so this request cannot be edited.");
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setEditingId(reservation.id);
+  }
+
+  async function handleEditPending(input: {
+    title: string;
+    purpose: string;
+    startTime: string;
+    endTime: string;
+    participants: { name: string; email: string }[];
+    notifyParticipants: boolean;
+  }) {
+    if (!editingId) {
+      throw new Error("Choose a request to edit.");
+    }
+
+    setSavingEdit(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(`/api/reservations/${editingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...input,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+      const payload: { message?: string } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to update this request.");
+      }
+
+      setEditingId("");
+      setSuccess(payload.message || "Your request was updated.");
+      router.refresh();
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   const selectedResource = data.resources.find(
     (resource) => resource.id === booking.resourceId
   );
@@ -646,6 +702,18 @@ export default function DashboardClient({
   const viewingReservation =
     data.reservations.find((reservation) => reservation.id === viewReservationId) ??
     null;
+  const editingReservation =
+    data.reservations.find(
+      (reservation) =>
+        reservation.id === editingId &&
+        reservation.status === "PENDING" &&
+        reservation.timing !== "past"
+    ) ?? null;
+  const editingResource = editingReservation
+    ? (data.resources.find(
+        (resource) => resource.id === editingReservation.resourceId
+      ) ?? null)
+    : null;
   const activity = buildActivity(data.reservations);
   const unreadCount = activity.filter(
     (item) => new Date(item.at).getTime() > seenNoticeAt
@@ -1701,6 +1769,7 @@ export default function DashboardClient({
                         }
                         cancelling={cancellingId === reservation.id}
                         onCancel={() => void handleCancel(reservation)}
+                        onEdit={() => openPendingEdit(reservation)}
                         onView={() => openReservationView(reservation)}
                       />
                     ))}
@@ -1715,9 +1784,10 @@ export default function DashboardClient({
                     <span className="font-semibold text-slate-800">
                       Cancellation Policy.{" "}
                     </span>
-                    You can cancel an upcoming booking or a request that is
-                    still waiting for approval. Once the reservation has ended,
-                    it can no longer be cancelled.
+                    You can edit a request that is still waiting for approval,
+                    including its time. You can also cancel an upcoming booking
+                    or a pending request. Once the reservation has ended, it
+                    can no longer be changed.
                   </p>
                 </div>
               </div>
@@ -1812,12 +1882,34 @@ export default function DashboardClient({
                 onParticipants={setParticipants}
                 onNotify={setNotifyParticipants}
                 onBook={handleBook}
+                onEdit={
+                  viewingReservation
+                    ? () => openPendingEdit(viewingReservation)
+                    : undefined
+                }
                 reservation={viewingReservation}
               />
             )}
           </div>
         </div>
       </div>
+      {editingReservation && editingResource && (
+        <PendingEditDialog
+          key={editingReservation.id}
+          reservation={editingReservation}
+          resource={editingResource}
+          occupiedSlots={slotsExceptReservation(
+            data.occupiedSlots,
+            editingReservation
+          )}
+          bookerEmail={data.user.email}
+          saving={savingEdit}
+          todayInput={todayInput}
+          latestInput={latestInput}
+          onClose={() => setEditingId("")}
+          onSubmit={handleEditPending}
+        />
+      )}
     </div>
   );
 }
@@ -1852,6 +1944,7 @@ function ResourceDetailView({
   onParticipants,
   onNotify,
   onBook,
+  onEdit,
   reservation,
 }: {
   resource: Resource;
@@ -1881,6 +1974,7 @@ function ResourceDetailView({
   onParticipants: (next: ParticipantDraft[]) => void;
   onNotify: (next: boolean) => void;
   onBook: (event: FormEvent<HTMLFormElement>) => void;
+  onEdit?: () => void;
   reservation: Reservation | null;
 }) {
   const photos = resourceGallery(resource);
@@ -2055,7 +2149,7 @@ function ResourceDetailView({
         </div>
 
         {reservation ? (
-          <ReservationReadonly reservation={reservation} />
+          <ReservationReadonly reservation={reservation} onEdit={onEdit} />
         ) : (
         <form
           onSubmit={onBook}
@@ -2347,8 +2441,18 @@ function ResourceDetailView({
   );
 }
 
-function ReservationReadonly({ reservation }: { reservation: Reservation }) {
+function ReservationReadonly({
+  reservation,
+  onEdit,
+}: {
+  reservation: Reservation;
+  onEdit?: () => void;
+}) {
   const schedule = reservationSchedule(reservation.startTime, reservation.endTime);
+  const canEdit =
+    reservation.status === "PENDING" &&
+    reservation.timing !== "past" &&
+    Boolean(onEdit);
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -2383,10 +2487,26 @@ function ReservationReadonly({ reservation }: { reservation: Reservation }) {
           </DetailRow>
         )}
       </dl>
-      <p className="mt-5 rounded-xl bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-500">
-        This booking is view only. The date, time, and people cannot be changed
-        from here.
-      </p>
+      {canEdit ? (
+        <div className="mt-5 space-y-3">
+          <p className="rounded-xl bg-amber-50 px-3 py-3 text-sm leading-6 text-amber-800">
+            This request is waiting for approval. You can change the title,
+            purpose, people, and the time.
+          </p>
+          <button
+            type="button"
+            onClick={onEdit}
+            className="inline-flex items-center rounded-xl border border-[#bfdbfe] px-4 py-2.5 text-sm font-semibold text-[#2563eb] transition hover:bg-blue-50"
+          >
+            Edit request
+          </button>
+        </div>
+      ) : (
+        <p className="mt-5 rounded-xl bg-slate-50 px-3 py-3 text-sm leading-6 text-slate-500">
+          This booking is view only. The date, time, and people cannot be
+          changed from here.
+        </p>
+      )}
     </section>
   );
 }
@@ -3565,17 +3685,20 @@ function ReservationRow({
   resource,
   cancelling,
   onCancel,
+  onEdit,
   onView,
 }: {
   reservation: Reservation;
   resource: Resource | null;
   cancelling: boolean;
   onCancel: () => void;
+  onEdit: () => void;
   onView: () => void;
 }) {
   const canCancel =
     (reservation.status === "CONFIRMED" || reservation.status === "PENDING") &&
     reservation.timing !== "past";
+  const canEdit = reservation.status === "PENDING" && reservation.timing !== "past";
   const schedule = reservationSchedule(reservation.startTime, reservation.endTime);
   const facilities = resource ? resourceFacilities(resource) : "";
   const category = resource
@@ -3658,6 +3781,16 @@ function ReservationRow({
               >
                 <EyeGlyph />
                 View Details
+              </button>
+            )}
+            {canEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-[#bfdbfe] px-3 py-2 text-sm font-semibold text-[#2563eb] transition hover:bg-blue-50"
+              >
+                <PencilGlyph />
+                Edit
               </button>
             )}
             {canCancel && (
@@ -3748,6 +3881,335 @@ function ReservationStat({
       </span>
       <ChevronIcon direction="right" />
     </button>
+  );
+}
+
+function PendingEditDialog({
+  reservation,
+  resource,
+  occupiedSlots,
+  bookerEmail,
+  saving,
+  todayInput,
+  latestInput,
+  onClose,
+  onSubmit,
+}: {
+  reservation: Reservation;
+  resource: Resource;
+  occupiedSlots: UserDashboardData["occupiedSlots"];
+  bookerEmail: string;
+  saving: boolean;
+  todayInput: string;
+  latestInput: string;
+  onClose: () => void;
+  onSubmit: (input: {
+    title: string;
+    purpose: string;
+    startTime: string;
+    endTime: string;
+    participants: { name: string; email: string }[];
+    notifyParticipants: boolean;
+  }) => Promise<void>;
+}) {
+  const start = new Date(reservation.startTime);
+  const end = new Date(reservation.endTime);
+  const [date, setDate] = useState(toDateInput(start));
+  const [startClock, setStartClock] = useState(toClockInput(start));
+  const [endClock, setEndClock] = useState(toClockInput(end));
+  const [title, setTitle] = useState(reservation.title);
+  const [purpose, setPurpose] = useState(reservation.purpose ?? "");
+  const [participants, setParticipants] = useState<ParticipantDraft[]>(() =>
+    draftsFromReservation(reservation, resource.capacity)
+  );
+  const [notify, setNotify] = useState(true);
+  const [formError, setFormError] = useState("");
+  const slot = resolveSlot(date, startClock, endClock);
+  const startOptions = ensureClockChoice(
+    openStartChoices(date, resource.id, occupiedSlots),
+    startClock
+  );
+  const endOptions = startClock
+    ? ensureClockChoice(
+        openEndChoices(date, startClock, resource.id, occupiedSlots),
+        endClock
+      )
+    : [];
+  const timeTaken = Boolean(
+    slot.window && !isResourceFree(resource.id, slot.window, occupiedSlots)
+  );
+  const needsApproval = Boolean(
+    slot.window &&
+      !timeTaken &&
+      needsAdminApproval(
+        slot.window.start,
+        slot.window.end,
+        Intl.DateTimeFormat().resolvedOptions().timeZone
+      )
+  );
+  const minimum = minimumPartySize(resource.capacity);
+  const filledOthers = participants.filter(
+    (person) => person.name.trim() && person.email.trim()
+  ).length;
+  const partyReady = resource.capacity <= 1 || filledOthers + 1 >= minimum;
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError("");
+
+    if (!slot.window) {
+      setFormError(slot.error || "Choose a valid date and time.");
+      return;
+    }
+
+    if (timeTaken) {
+      setFormError("That resource is already booked for the selected time.");
+      return;
+    }
+
+    let filledPeople: { name: string; email: string }[] = [];
+
+    try {
+      if (resource.capacity > 1) {
+        filledPeople = parseParticipants(participants);
+        assertParticipantCapacity(resource.capacity, filledPeople, bookerEmail);
+      }
+    } catch (error) {
+      if (error instanceof ParticipantInputError) {
+        setFormError(error.message);
+        return;
+      }
+
+      throw error;
+    }
+
+    try {
+      await onSubmit({
+        title: title.trim(),
+        purpose: purpose.trim(),
+        startTime: slot.window.start.toISOString(),
+        endTime: slot.window.end.toISOString(),
+        participants: filledPeople.map((person) => ({
+          name: person.name.trim().replace(/\s+/g, " "),
+          email: person.email.trim().toLowerCase(),
+        })),
+        notifyParticipants: notify && filledPeople.length > 0,
+      });
+    } catch (error) {
+      setFormError(
+        error instanceof Error ? error.message : "Unable to update this request."
+      );
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+      <form
+        onSubmit={(event) => void handleSubmit(event)}
+        className="max-h-[min(90vh,760px)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-lg font-bold">Edit pending request</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {resource.name} · {resource.location}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-3 py-2 text-slate-500 hover:bg-slate-100"
+            aria-label="Close edit form"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="mt-5 space-y-4">
+          <FormField label="Date">
+            <input
+              type="date"
+              required
+              min={todayInput}
+              max={latestInput}
+              value={date}
+              onChange={(event) => setDate(event.target.value)}
+              className={inputClass}
+            />
+          </FormField>
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Start time">
+              <select
+                required
+                value={startClock}
+                onChange={(event) => {
+                  setStartClock(event.target.value);
+                  setEndClock("");
+                }}
+                className={inputClass}
+              >
+                <option value="">Select time</option>
+                {startOptions.map((choice) => (
+                  <option key={`edit-start-${choice.value}`} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="End time">
+              <select
+                required
+                value={endClock}
+                onChange={(event) => setEndClock(event.target.value)}
+                disabled={!startClock}
+                className={inputClass}
+              >
+                <option value="">
+                  {startClock ? "Select time" : "Choose a start time first"}
+                </option>
+                {endOptions.map((choice) => (
+                  <option key={`edit-end-${choice.value}`} value={choice.value}>
+                    {choice.label}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+          </div>
+          <p className="text-sm text-slate-500">
+            Leave the time as it is, or choose another slot. A time outside
+            8:00 AM–8:00 PM stays pending. A time inside office hours is
+            confirmed when you save.
+          </p>
+          {slot.window && !timeTaken && (
+            <p className="text-sm text-slate-500">
+              {formatDuration(slot.window.end.getTime() - slot.window.start.getTime())}
+              {endClock <= startClock ? " · ends the next day" : ""}
+            </p>
+          )}
+          {(formError || slot.error || timeTaken) && (
+            <p className="text-sm text-amber-700">
+              {formError ||
+                (timeTaken
+                  ? "That resource is already booked for the selected time."
+                  : slot.error)}
+            </p>
+          )}
+          <FormField label="Title">
+            <input
+              required
+              maxLength={120}
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              className={inputClass}
+            />
+          </FormField>
+          <FormField label="Purpose (optional)">
+            <input
+              maxLength={500}
+              value={purpose}
+              onChange={(event) => setPurpose(event.target.value)}
+              placeholder="What is this booking for?"
+              className={inputClass}
+            />
+          </FormField>
+          {resource.capacity <= 1 ? (
+            <p className="text-sm text-slate-500">
+              This resource fits one person, so the booking is only for you.
+            </p>
+          ) : (
+            <ParticipantFields
+              capacity={resource.capacity}
+              participants={participants}
+              notify={notify}
+              onChange={setParticipants}
+              onNotifyChange={setNotify}
+            />
+          )}
+          {needsApproval && (
+            <p className="text-sm leading-6 text-amber-700">
+              This time is outside office hours, so the request stays pending
+              until an administrator approves it. Added people are emailed
+              after it is confirmed.
+            </p>
+          )}
+          {slot.window && !needsApproval && !timeTaken && (
+            <p className="text-sm leading-6 text-emerald-700">
+              This time is inside office hours. Saving confirms the booking.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-6 flex flex-wrap justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={saving || !slot.window || timeTaken || !partyReady}
+            className="rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {saving ? "Saving..." : "Save changes"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function draftsFromReservation(reservation: Reservation, capacity: number) {
+  const drafts = reservation.participants.map((person) => ({
+    name: person.name,
+    email: person.email,
+  }));
+  const needed = Math.max(minimumPartySize(capacity) - 1, 0);
+
+  while (drafts.length < needed) {
+    drafts.push({ name: "", email: "" });
+  }
+
+  return drafts;
+}
+
+function slotsExceptReservation(
+  slots: UserDashboardData["occupiedSlots"],
+  reservation: Reservation
+) {
+  const start = new Date(reservation.startTime).getTime();
+  const end = new Date(reservation.endTime).getTime();
+
+  return slots.filter((slot) => {
+    if (slot.resourceId !== reservation.resourceId) {
+      return true;
+    }
+
+    return (
+      new Date(slot.startTime).getTime() !== start ||
+      new Date(slot.endTime).getTime() !== end
+    );
+  });
+}
+
+function ensureClockChoice(
+  options: { value: string; label: string }[],
+  value: string
+) {
+  if (!value || options.some((choice) => choice.value === value)) {
+    return options;
+  }
+
+  return [{ value, label: formatClockLabel(value) }, ...options];
+}
+
+function PencilGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M4 20h4l10.5-10.5a1.4 1.4 0 0 0 0-2L16.5 5.5a1.4 1.4 0 0 0-2 0L4 16z" />
+      <path d="M13.5 6.5l4 4" />
+    </svg>
   );
 }
 
