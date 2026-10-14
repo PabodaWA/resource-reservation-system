@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import { Prisma } from "@/generated/prisma/client";
+import { resolveJobPosition } from "@/lib/job-position";
 import { isMailConfigured, sendTemporaryPasswordEmail } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/require-auth";
@@ -66,6 +67,18 @@ export async function POST(request: Request) {
       );
     }
 
+    const jobPosition = resolveJobPosition(
+      body.role,
+      "jobPosition" in body ? body.jobPosition : undefined
+    );
+
+    if (!jobPosition) {
+      return NextResponse.json(
+        { message: "Select a job position." },
+        { status: 400 }
+      );
+    }
+
     const name = body.name.trim();
     const email = body.email.trim().toLowerCase();
 
@@ -80,6 +93,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { message: "Enter a valid email address." },
         { status: 400 }
+      );
+    }
+
+    const existingEmail = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+
+    if (existingEmail) {
+      return NextResponse.json(
+        { message: "An account with this email already exists." },
+        { status: 409 }
       );
     }
 
@@ -102,6 +127,7 @@ export async function POST(request: Request) {
         email,
         passwordHash,
         role: body.role,
+        jobPosition,
         isActive: true,
         mustChangePassword: true,
       },
@@ -110,6 +136,7 @@ export async function POST(request: Request) {
         name: true,
         email: true,
         role: true,
+        jobPosition: true,
       },
     });
 

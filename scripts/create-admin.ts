@@ -47,6 +47,7 @@ async function main() {
         email,
         passwordHash,
         role: "ADMIN",
+        jobPosition: "ADMIN",
         isActive: true,
         mustChangePassword: true,
       },

@@ -2,6 +2,12 @@
 
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import {
+  MEMBER_JOB_POSITIONS,
+  isJobPosition,
+  jobPositionLabel,
+  type JobPosition,
+} from "@/lib/job-position";
 
 export type AdminDashboardData = {
   admin: {
@@ -14,6 +20,7 @@ export type AdminDashboardData = {
     name: string;
     email: string;
     role: "ADMIN" | "MEMBER";
+    jobPosition: JobPosition;
     isActive: boolean;
     createdAt: string;
   }[];
@@ -155,7 +162,21 @@ const emptyUser = {
   name: "",
   email: "",
   role: "MEMBER" as "ADMIN" | "MEMBER",
+  jobPosition: "" as JobPosition | "",
 };
+
+function emailAlreadyUsed(
+  users: { id: string; email: string }[],
+  email: string,
+  exceptUserId?: string
+) {
+  const normalized = email.trim().toLowerCase();
+
+  return users.some(
+    (user) =>
+      user.id !== exceptUserId && user.email.trim().toLowerCase() === normalized
+  );
+}
 
 const emptyResource = {
   name: "",
@@ -329,11 +350,13 @@ export default function AdminDashboardClient({
       }
 
       const roleLabel = user.role === "ADMIN" ? "admin" : "user";
+      const positionLabel = jobPositionLabel(user.jobPosition).toLowerCase();
 
       return (
         user.name.toLowerCase().includes(term) ||
         user.email.toLowerCase().includes(term) ||
-        roleLabel.includes(term)
+        roleLabel.includes(term) ||
+        positionLabel.includes(term)
       );
     });
 
@@ -641,6 +664,22 @@ export default function AdminDashboardClient({
       return;
     }
 
+    if (emailAlreadyUsed(data.users, email)) {
+      setError("An account with this email already exists.");
+      return;
+    }
+
+    const jobPosition =
+      userForm.role === "ADMIN" ? "ADMIN" : userForm.jobPosition;
+
+    if (
+      !isJobPosition(jobPosition) ||
+      (jobPosition === "ADMIN" && userForm.role !== "ADMIN")
+    ) {
+      setError("Select a job position.");
+      return;
+    }
+
     setSavingUser(true);
 
     try {
@@ -651,6 +690,7 @@ export default function AdminDashboardClient({
           name,
           email,
           role: userForm.role,
+          jobPosition,
         }),
       });
 
@@ -689,6 +729,7 @@ export default function AdminDashboardClient({
       name: user.name,
       email: user.email,
       role: user.role,
+      jobPosition: user.jobPosition,
     });
     setUserModal("edit");
   }
@@ -724,6 +765,19 @@ export default function AdminDashboardClient({
       return;
     }
 
+    if (emailAlreadyUsed(data.users, email, editing.id)) {
+      setError("An account with this email already exists.");
+      return;
+    }
+
+    const jobPosition =
+      userForm.role === "ADMIN" ? "ADMIN" : userForm.jobPosition;
+
+    if (!isJobPosition(jobPosition) || (jobPosition === "ADMIN" && userForm.role !== "ADMIN")) {
+      setError("Select a job position.");
+      return;
+    }
+
     setSavingUser(true);
 
     try {
@@ -734,6 +788,7 @@ export default function AdminDashboardClient({
           name,
           email,
           role: userForm.role,
+          jobPosition,
           isActive,
         }),
       });
@@ -1751,9 +1806,17 @@ export default function AdminDashboardClient({
             </h2>
             <p className="mt-1 text-sm text-slate-500">
               {userModal === "edit"
-                ? "Update this person's name, email, role, or status."
+                ? "Update this person's name, email, role, job position, or status."
                 : "They receive a temporary password by email, then choose their own."}
             </p>
+            {error && (
+              <p
+                role="alert"
+                className="mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+              >
+                {error}
+              </p>
+            )}
 
             <label className="mt-5 block text-sm font-medium text-slate-700">
               Full name
@@ -1795,16 +1858,58 @@ export default function AdminDashboardClient({
               Role
               <select
                 value={userForm.role}
-                onChange={(event) =>
+                onChange={(event) => {
+                  const role =
+                    event.target.value === "ADMIN" ? "ADMIN" : "MEMBER";
+
                   setUserForm((current) => ({
                     ...current,
-                    role: event.target.value === "ADMIN" ? "ADMIN" : "MEMBER",
-                  }))
-                }
+                    role,
+                    jobPosition:
+                      role === "ADMIN"
+                        ? "ADMIN"
+                        : current.jobPosition === "ADMIN"
+                          ? ""
+                          : current.jobPosition,
+                  }));
+                }}
                 className={`${inputClass} mt-2`}
               >
                 <option value="MEMBER">User</option>
                 <option value="ADMIN">Administrator</option>
+              </select>
+            </label>
+
+            <label className="mt-4 block text-sm font-medium text-slate-700">
+              Job position
+              <select
+                required
+                disabled={userForm.role === "ADMIN"}
+                value={userForm.role === "ADMIN" ? "ADMIN" : userForm.jobPosition}
+                onChange={(event) =>
+                  setUserForm((current) => ({
+                    ...current,
+                    jobPosition: isJobPosition(event.target.value)
+                      ? event.target.value
+                      : "",
+                  }))
+                }
+                className={`${inputClass} mt-2 disabled:bg-slate-50 disabled:text-slate-500`}
+              >
+                {userForm.role === "ADMIN" ? (
+                  <option value="ADMIN">Admin</option>
+                ) : (
+                  <>
+                    <option value="" disabled>
+                      Select a job position
+                    </option>
+                    {MEMBER_JOB_POSITIONS.map((position) => (
+                      <option key={position.value} value={position.value}>
+                        {position.label}
+                      </option>
+                    ))}
+                  </>
+                )}
               </select>
             </label>
 
@@ -1967,7 +2072,7 @@ function UsersPanel({
           <input
             value={search}
             onChange={(event) => onSearch(event.target.value)}
-            placeholder="Search by name, email, or role..."
+            placeholder="Search by name, email, role, or job position..."
             className="h-11 w-full rounded-xl border border-[#E2EAF3] bg-white pl-10 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-[#93C5FD] focus:ring-2 focus:ring-[#DBEAFE]"
           />
         </div>
@@ -2031,13 +2136,14 @@ function UsersPanel({
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#E8EEF5] bg-white shadow-[0_8px_24px_rgba(15,42,68,0.04)]">
         <div className="min-h-0 flex-1 overflow-auto">
-          <table className="w-full min-w-[860px] text-left text-sm">
+          <table className="w-full min-w-[980px] text-left text-sm">
             <thead className="sticky top-0 bg-white">
               <tr className="border-b border-[#F1F5F9] text-xs text-slate-400">
                 <th className="px-4 py-3 font-medium">#</th>
                 <th className="px-2 py-3 font-medium">User</th>
                 <th className="px-2 py-3 font-medium">Email</th>
                 <th className="px-2 py-3 font-medium">Role</th>
+                <th className="px-2 py-3 font-medium">Job position</th>
                 <th className="px-2 py-3 font-medium">Status</th>
                 <th className="px-2 py-3 font-medium">Joined Date</th>
                 <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -2046,7 +2152,7 @@ function UsersPanel({
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
                     No users match these filters.
                   </td>
                 </tr>
@@ -2079,6 +2185,9 @@ function UsersPanel({
                       >
                         {user.role === "ADMIN" ? "Admin" : "User"}
                       </span>
+                    </td>
+                    <td className="px-2 py-3 text-slate-600">
+                      {jobPositionLabel(user.jobPosition)}
                     </td>
                     <td className="px-2 py-3">
                       <span

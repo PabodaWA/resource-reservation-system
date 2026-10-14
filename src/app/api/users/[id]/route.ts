@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
+import { resolveJobPosition } from "@/lib/job-position";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/require-auth";
 
@@ -48,6 +49,18 @@ export async function PATCH(
       );
     }
 
+    const jobPosition = resolveJobPosition(
+      body.role,
+      "jobPosition" in body ? body.jobPosition : undefined
+    );
+
+    if (!jobPosition) {
+      return NextResponse.json(
+        { message: "Select a job position." },
+        { status: 400 }
+      );
+    }
+
     const name = body.name.trim();
     const email = body.email.trim().toLowerCase();
 
@@ -62,6 +75,18 @@ export async function PATCH(
       return NextResponse.json(
         { message: "Enter a valid email address." },
         { status: 400 }
+      );
+    }
+
+    const emailOwner = await prisma.user.findUnique({
+      where: { email },
+      select: { id: true },
+    });
+
+    if (emailOwner && emailOwner.id !== id) {
+      return NextResponse.json(
+        { message: "An account with this email already exists." },
+        { status: 409 }
       );
     }
 
@@ -107,6 +132,7 @@ export async function PATCH(
         name,
         email,
         role: body.role,
+        jobPosition,
         isActive: body.isActive,
       },
       select: {
@@ -114,6 +140,7 @@ export async function PATCH(
         name: true,
         email: true,
         role: true,
+        jobPosition: true,
         isActive: true,
       },
     });
