@@ -902,7 +902,7 @@ export default function DashboardClient({
               type="button"
               onClick={() => void handleLogout()}
               disabled={loggingOut}
-              className="mx-auto mt-3 flex items-center justify-center rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+              className="mt-3 flex w-full items-center justify-center rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
             >
               {loggingOut ? "Logging out..." : "Log out"}
             </button>
