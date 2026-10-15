@@ -65,6 +65,7 @@ async function ProtectedAdmin() {
         role: true,
         jobPosition: true,
         isActive: true,
+        lockedUntil: true,
         createdAt: true,
       },
     }),
@@ -132,6 +133,7 @@ async function ProtectedAdmin() {
       role: item.role,
       jobPosition: item.jobPosition,
       isActive: item.isActive,
+      lockedUntil: item.lockedUntil?.toISOString() ?? null,
       createdAt: item.createdAt.toISOString(),
     })),
     resources: resources.map((item) => ({
