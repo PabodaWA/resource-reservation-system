@@ -44,12 +44,31 @@ export async function confirmResetCode(
     where: { email },
   });
 
-  if (
-    !user ||
-    !user.isActive ||
-    !user.passwordResetOtpHash ||
-    !user.passwordResetOtpExpiry
-  ) {
+  if (!user || !user.isActive) {
+    return {
+      ok: false,
+      status: 400,
+      message: "That code is invalid or has expired. Request a new one.",
+    };
+  }
+
+  if (user.mustChangePassword) {
+    if (user.passwordResetOtpHash || user.passwordResetOtpExpiry) {
+      await prisma.user.update({
+        where: { id: user.id },
+        data: clearedReset,
+      });
+    }
+
+    return {
+      ok: false,
+      status: 403,
+      message:
+        "This account still uses a temporary password. Sign in with the password from your welcome email and set your own password. Password reset is available after that.",
+    };
+  }
+
+  if (!user.passwordResetOtpHash || !user.passwordResetOtpExpiry) {
     return {
       ok: false,
       status: 400,

@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { parseResourceClassification } from "@/lib/resource-catalog";
 import { isResourceLocation } from "@/lib/resource-locations";
 import { parseResourceImages } from "@/lib/resource-images";
 import { requireAdmin, requireAuth } from "@/lib/require-auth";
@@ -50,20 +51,30 @@ export async function POST(request: Request) {
       typeof body !== "object" ||
       body === null ||
       !("name" in body) ||
-      !("type" in body) ||
+      !("category" in body) ||
+      !("subcategory" in body) ||
       !("location" in body) ||
       typeof body.name !== "string" ||
-      typeof body.type !== "string" ||
       typeof body.location !== "string" ||
       !body.name.trim() ||
-      !body.type.trim() ||
       !body.location.trim() ||
       body.name.trim().length > 120 ||
-      body.type.trim().length > 80 ||
       !isResourceLocation(body.location.trim())
     ) {
       return NextResponse.json(
-        { message: "Valid name, type, and location are required." },
+        { message: "Valid name, category, subcategory, and location are required." },
+        { status: 400 }
+      );
+    }
+
+    const classification = parseResourceClassification(
+      body.category,
+      body.subcategory
+    );
+
+    if (!classification.ok) {
+      return NextResponse.json(
+        { message: classification.message },
         { status: 400 }
       );
     }
@@ -108,7 +119,8 @@ export async function POST(request: Request) {
     const resource = await prisma.resource.create({
       data: {
         name: body.name.trim(),
-        type: body.type.trim(),
+        category: classification.category,
+        subcategory: classification.subcategory,
         location: body.location.trim(),
         capacity,
         description:

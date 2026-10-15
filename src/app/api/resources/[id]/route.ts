@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { parseResourceClassification } from "@/lib/resource-catalog";
 import { isResourceLocation } from "@/lib/resource-locations";
 import { parseResourceImages } from "@/lib/resource-images";
 import { requireAdmin } from "@/lib/require-auth";
@@ -34,22 +35,33 @@ export async function PATCH(
       typeof body !== "object" ||
       body === null ||
       !("name" in body) ||
-      !("type" in body) ||
+      !("category" in body) ||
+      !("subcategory" in body) ||
       !("location" in body) ||
       !("status" in body) ||
       typeof body.name !== "string" ||
-      typeof body.type !== "string" ||
       typeof body.location !== "string" ||
       (body.status !== "ACTIVE" && body.status !== "INACTIVE")
     ) {
       return NextResponse.json(
-        { message: "Name, type, location, and status are required." },
+        { message: "Name, category, subcategory, location, and status are required." },
+        { status: 400 }
+      );
+    }
+
+    const classification = parseResourceClassification(
+      body.category,
+      body.subcategory
+    );
+
+    if (!classification.ok) {
+      return NextResponse.json(
+        { message: classification.message },
         { status: 400 }
       );
     }
 
     const name = body.name.trim();
-    const type = body.type.trim();
     const location = body.location.trim();
     const capacity = "capacity" in body ? body.capacity : 1;
     const description = "description" in body ? body.description : null;
@@ -57,13 +69,6 @@ export async function PATCH(
     if (!name || name.length > 120) {
       return NextResponse.json(
         { message: "Resource name must be between 1 and 120 characters." },
-        { status: 400 }
-      );
-    }
-
-    if (!type || type.length > 80) {
-      return NextResponse.json(
-        { message: "A valid resource type is required." },
         { status: 400 }
       );
     }
@@ -118,7 +123,8 @@ export async function PATCH(
       where: { id },
       data: {
         name,
-        type,
+        category: classification.category,
+        subcategory: classification.subcategory,
         location,
         capacity,
         status: body.status,

@@ -53,6 +53,23 @@ export async function POST(request: Request) {
       );
     }
 
+    if (user.mustChangePassword) {
+      if (user.passwordResetOtpHash || user.passwordResetOtpExpiry) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: clearedReset,
+        });
+      }
+
+      return NextResponse.json(
+        {
+          message:
+            "This account still uses a temporary password. Sign in with the password from your welcome email and set your own password. Password reset is available after that.",
+        },
+        { status: 403 }
+      );
+    }
+
     if (user.passwordResetOtpExpiry) {
       const waitMs = resendCooldownMs(user.passwordResetOtpExpiry);
 
