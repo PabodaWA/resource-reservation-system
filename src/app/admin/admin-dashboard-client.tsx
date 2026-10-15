@@ -91,10 +91,10 @@ type SearchHit = {
 
 const sections: { id: Section; label: string }[] = [
   { id: "dashboard", label: "Dashboard" },
+  { id: "pending", label: "Pending Requests" },
   { id: "users", label: "Manage Users" },
   { id: "resources", label: "Manage Resources" },
   { id: "reservations", label: "Reservations" },
-  { id: "pending", label: "Pending Requests" },
   { id: "reports", label: "Reports" },
   { id: "notifications", label: "Notifications" },
   { id: "profile", label: "Profile" },
