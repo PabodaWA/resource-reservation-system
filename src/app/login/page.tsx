@@ -68,7 +68,7 @@ export default function LoginPage() {
         alt=""
         className="login-hero absolute inset-0 h-full w-full object-cover object-center"
       />
-      <div className="absolute top-6 left-6 z-10 flex items-center gap-3.5 sm:top-8 sm:left-8">
+      <div className="absolute top-6 left-6 z-10 flex max-w-[calc(100%-6.5rem)] items-center gap-3.5 sm:top-8 sm:left-8">
         <img
           src="/R%20logo.jpg"
           alt=""
@@ -83,12 +83,12 @@ export default function LoginPage() {
           </p>
         </div>
       </div>
+      <div className="absolute top-6 right-6 z-10 sm:top-8 sm:right-8">
+        <ThemeToggle />
+      </div>
       <div className="relative flex min-h-dvh items-center justify-end px-4 py-6 sm:px-8 lg:pr-[calc(6rem+3cm)] xl:pr-[calc(8rem+3cm)]">
         <section className="my-auto w-full max-w-[calc(520px+4cm)]">
           <div className="relative w-full rounded-[28px] bg-white px-9 pt-[calc(1rem+1cm)] pb-[calc(2.25rem+2cm)] shadow-[0_24px_70px_rgba(16,42,84,0.18)]">
-            <div className="absolute top-5 right-5">
-              <ThemeToggle />
-            </div>
             {showForgotPassword ? (
               <ForgotPasswordPanel
                 initialEmail={email}
@@ -109,7 +109,7 @@ export default function LoginPage() {
             ) : (
             <>
             <div>
-              <h3 className="pr-14 text-[2.85rem] leading-[1.05] font-bold tracking-tight text-[#10284f]">
+              <h3 className="text-[2.85rem] leading-[1.05] font-bold tracking-tight text-[#10284f]">
                 Sign In To Your Account
               </h3>  
             </div>
