@@ -45,6 +45,7 @@ export type UserDashboardData = {
     location: string;
     capacity: number;
     description: string | null;
+    facilities: string | null;
     images: string[];
     upcomingBookings: number;
   }[];
@@ -2794,13 +2795,7 @@ function resourceBlurb(resource: Resource) {
 }
 
 function resourceFacilities(resource: Resource) {
-  const description = resource.description?.trim() ?? "";
-
-  if (description.includes(",") && description.length <= 160) {
-    return description;
-  }
-
-  return "";
+  return resource.facilities?.trim() ?? "";
 }
 
 function UpcomingSchedule({
@@ -5241,6 +5236,7 @@ function matchesResource(
     subcategory: string;
     location: string;
     description: string | null;
+    facilities?: string | null;
   },
   query: string
 ) {
@@ -5255,7 +5251,8 @@ function matchesResource(
     subcategoryLabel(resource.subcategory).toLowerCase().includes(term) ||
     categoryLabel(resource.category).toLowerCase().includes(term) ||
     resource.location.toLowerCase().includes(term) ||
-    (resource.description ?? "").toLowerCase().includes(term)
+    (resource.description ?? "").toLowerCase().includes(term) ||
+    (resource.facilities ?? "").toLowerCase().includes(term)
   );
 }
 

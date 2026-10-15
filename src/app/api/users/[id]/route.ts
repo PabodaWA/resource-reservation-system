@@ -201,14 +201,14 @@ export async function DELETE(
 
     if (id === auth.user.id) {
       return NextResponse.json(
-        { message: "You cannot delete your own account." },
+        { message: "You cannot deactivate your own account." },
         { status: 400 }
       );
     }
 
     const user = await prisma.user.findUnique({
       where: { id },
-      select: { id: true, role: true },
+      select: { id: true, name: true, role: true, isActive: true },
     });
 
     if (!user) {
@@ -218,30 +218,42 @@ export async function DELETE(
       );
     }
 
+    if (!user.isActive) {
+      return NextResponse.json({
+        message: "This account is already inactive.",
+        user: {
+          id: user.id,
+          isActive: false,
+        },
+      });
+    }
+
     if (user.role === "ADMIN") {
-      const adminCount = await prisma.user.count({
-        where: { role: "ADMIN" },
+      const activeAdminCount = await prisma.user.count({
+        where: { role: "ADMIN", isActive: true },
       });
 
-      if (adminCount <= 1) {
+      if (activeAdminCount <= 1) {
         return NextResponse.json(
-          { message: "The last administrator cannot be deleted." },
+          { message: "The last administrator cannot be deactivated." },
           { status: 400 }
         );
       }
     }
 
-    await prisma.$transaction([
-      prisma.reservation.deleteMany({
-        where: { userId: user.id },
-      }),
-      prisma.user.delete({
-        where: { id: user.id },
-      }),
-    ]);
+    const updated = await prisma.user.update({
+      where: { id: user.id },
+      data: { isActive: false },
+      select: {
+        id: true,
+        name: true,
+        isActive: true,
+      },
+    });
 
     return NextResponse.json({
-      message: "User deleted successfully.",
+      message: "Account is now inactive.",
+      user: updated,
     });
   } catch (error) {
     if (
@@ -254,10 +266,10 @@ export async function DELETE(
       );
     }
 
-    console.error("Failed to delete user:", error);
+    console.error("Failed to deactivate user:", error);
 
     return NextResponse.json(
-      { message: "Failed to delete user." },
+      { message: "Failed to deactivate the user." },
       { status: 500 }
     );
   }

@@ -106,6 +106,19 @@ export async function POST(request: Request) {
       );
     }
 
+    const facilities = "facilities" in body ? body.facilities : undefined;
+
+    if (
+      facilities !== undefined &&
+      facilities !== null &&
+      (typeof facilities !== "string" || facilities.length > 500)
+    ) {
+      return NextResponse.json(
+        { message: "Facilities must be a string of at most 500 characters." },
+        { status: 400 }
+      );
+    }
+
     const images = "images" in body ? body.images : [];
     const parsedImages = parseResourceImages(images);
 
@@ -126,6 +139,10 @@ export async function POST(request: Request) {
         description:
           typeof description === "string" && description.trim()
             ? description.trim()
+            : null,
+        facilities:
+          typeof facilities === "string" && facilities.trim()
+            ? facilities.trim()
             : null,
         images: parsedImages.images,
       },

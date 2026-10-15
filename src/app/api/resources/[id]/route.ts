@@ -65,6 +65,7 @@ export async function PATCH(
     const location = body.location.trim();
     const capacity = "capacity" in body ? body.capacity : 1;
     const description = "description" in body ? body.description : null;
+    const facilities = "facilities" in body ? body.facilities : null;
 
     if (!name || name.length > 120) {
       return NextResponse.json(
@@ -109,6 +110,16 @@ export async function PATCH(
       );
     }
 
+    if (
+      facilities !== null &&
+      (typeof facilities !== "string" || facilities.length > 500)
+    ) {
+      return NextResponse.json(
+        { message: "Facilities must be 500 characters or fewer." },
+        { status: 400 }
+      );
+    }
+
     const parsedImages =
       "images" in body ? parseResourceImages(body.images) : null;
 
@@ -131,6 +142,10 @@ export async function PATCH(
         description:
           typeof description === "string" && description.trim()
             ? description.trim()
+            : null,
+        facilities:
+          typeof facilities === "string" && facilities.trim()
+            ? facilities.trim()
             : null,
         ...(parsedImages?.ok ? { images: parsedImages.images } : {}),
       },
@@ -189,7 +204,7 @@ export async function DELETE(
 
     const resource = await prisma.resource.findUnique({
       where: { id },
-      select: { id: true, name: true },
+      select: { id: true, name: true, status: true },
     });
 
     if (!resource) {
@@ -199,21 +214,47 @@ export async function DELETE(
       );
     }
 
-    const bookings = await prisma.reservation.count({
-      where: { resourceId: resource.id },
+    const openBookings = await prisma.reservation.count({
+      where: {
+        resourceId: resource.id,
+        status: { in: ["CONFIRMED", "PENDING"] },
+        endTime: { gt: new Date() },
+      },
     });
 
-    if (bookings > 0) {
+    if (resource.status === "ACTIVE") {
+      const updated = await prisma.resource.update({
+        where: { id: resource.id },
+        data: { status: "INACTIVE" },
+        select: { id: true, name: true, status: true },
+      });
+
+      return NextResponse.json({
+        message:
+          openBookings > 0
+            ? `${updated.name} is now unavailable. You can delete it after the upcoming reservations are finished.`
+            : `${updated.name} is now unavailable. You can delete it now.`,
+        resource: updated,
+      });
+    }
+
+    if (openBookings > 0) {
       return NextResponse.json(
         {
-          message:
-            "This resource has reservations, so it cannot be deleted. Mark it unavailable instead.",
+          message: `${resource.name} still has upcoming reservations. You can delete it after they are finished.`,
         },
         { status: 400 }
       );
     }
 
-    await prisma.resource.delete({ where: { id: resource.id } });
+    await prisma.$transaction([
+      prisma.reservation.deleteMany({
+        where: { resourceId: resource.id },
+      }),
+      prisma.resource.delete({
+        where: { id: resource.id },
+      }),
+    ]);
 
     return NextResponse.json({
       message: `${resource.name} was deleted.`,
@@ -229,10 +270,10 @@ export async function DELETE(
       );
     }
 
-    console.error("Failed to delete resource:", error);
+    console.error("Failed to remove resource:", error);
 
     return NextResponse.json(
-      { message: "Failed to delete the resource." },
+      { message: "Failed to remove the resource." },
       { status: 500 }
     );
   }

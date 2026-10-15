@@ -47,6 +47,7 @@ export type AdminDashboardData = {
     location: string;
     capacity: number;
     description: string | null;
+    facilities: string | null;
     images: string[];
     status: "ACTIVE" | "INACTIVE";
     createdAt: string;
@@ -63,12 +64,17 @@ export type AdminDashboardData = {
     updatedAt: string;
     timing: "upcoming" | "in_progress" | "past";
     resourceId: string;
+    userId: string;
     userName: string;
     userEmail: string;
+    userJobPosition: JobPosition;
     resourceName: string;
     resourceCategory: string;
     resourceSubcategory: string;
     resourceLocation: string;
+    resourceCapacity: number;
+    resourceDescription: string | null;
+    resourceFacilities: string | null;
     participants: {
       name: string;
       email: string;
@@ -139,7 +145,7 @@ const sectionCopy: Record<Section, { title: string; detail: string }> = {
   },
   reports: {
     title: "Reports",
-    detail: "Usage and booking trends for the selected week.",
+    detail: "Weekly trends, plus downloads of every user, reservation, and resource.",
   },
   notifications: {
     title: "Notifications",
@@ -170,6 +176,13 @@ const emptyUser = {
   jobPosition: "" as JobPosition | "",
 };
 
+function isUserConfirmedBooking(
+  reservation: { status: string; userId: string },
+  adminId: string
+) {
+  return reservation.status === "CONFIRMED" && reservation.userId !== adminId;
+}
+
 function isAccountLocked(lockedUntil: string | null) {
   return lockedUntil !== null && new Date(lockedUntil).getTime() > Date.now();
 }
@@ -194,6 +207,7 @@ const emptyResource = {
   location: "",
   capacity: "1",
   description: "",
+  facilities: "",
   images: [] as string[],
   status: "ACTIVE" as "ACTIVE" | "INACTIVE",
 };
@@ -263,6 +277,7 @@ export default function AdminDashboardClient({
   const [loggingOut, setLoggingOut] = useState(false);
   const [clearedNoticeAt, setClearedNoticeAt] = useState(0);
   const [reviewingId, setReviewingId] = useState("");
+  const [deletingReservationId, setDeletingReservationId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -439,7 +454,8 @@ export default function AdminDashboardClient({
         resource.name.toLowerCase().includes(term) ||
         category.toLowerCase().includes(term) ||
         subcategoryLabel(resource.subcategory).toLowerCase().includes(term) ||
-        resource.location.toLowerCase().includes(term)
+        resource.location.toLowerCase().includes(term) ||
+        (resource.facilities ?? "").toLowerCase().includes(term)
       );
     });
 
@@ -665,6 +681,52 @@ export default function AdminDashboardClient({
     }
   }
 
+  async function handleDeleteReservation(
+    reservation: AdminDashboardData["reservations"][number]
+  ) {
+    setError("");
+    setSuccess("");
+
+    if (isUserConfirmedBooking(reservation, data.admin.id)) {
+      setError("A confirmed booking made by a user cannot be deleted.");
+      return false;
+    }
+
+    const stillBooked =
+      reservation.status !== "CANCELLED" && reservation.timing !== "past";
+    const confirmed = window.confirm(
+      stillBooked
+        ? `Delete “${reservation.title}”? This removes it permanently and emails the people on the booking.`
+        : `Delete “${reservation.title}”? This removes it permanently.`
+    );
+
+    if (!confirmed) {
+      return false;
+    }
+
+    setDeletingReservationId(reservation.id);
+
+    try {
+      const response = await fetch(`/api/reservations/${reservation.id}`, {
+        method: "DELETE",
+      });
+      const payload: { message?: string } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to delete this reservation.");
+      }
+
+      setSuccess(payload.message || "Reservation deleted.");
+      router.refresh();
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      return true;
+    } finally {
+      setDeletingReservationId("");
+    }
+  }
+
   async function handleLogout() {
     setLoggingOut(true);
 
@@ -850,12 +912,17 @@ export default function AdminDashboardClient({
     setSuccess("");
 
     if (user.id === data.admin.id) {
-      setError("You cannot delete your own account.");
+      setError("You cannot deactivate your own account.");
+      return;
+    }
+
+    if (!user.isActive) {
+      setError(`${user.name} is already inactive.`);
       return;
     }
 
     const confirmed = window.confirm(
-      `Delete ${user.name}? Their account and reservations will be removed.`
+      `Deactivate ${user.name}? They will not be able to sign in until an administrator activates the account again. Existing reservations stay in place.`
     );
 
     if (!confirmed) {
@@ -872,10 +939,10 @@ export default function AdminDashboardClient({
       const payload: { message?: string } = await response.json();
 
       if (!response.ok) {
-        throw new Error(payload.message || "Unable to delete this member.");
+        throw new Error(payload.message || "Unable to deactivate this account.");
       }
 
-      setSuccess(`${user.name} was deleted.`);
+      setSuccess(`${user.name} is now inactive.`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -925,6 +992,7 @@ export default function AdminDashboardClient({
     const name = resourceForm.name.trim();
     const location = resourceForm.location.trim();
     const description = resourceForm.description.trim();
+    const facilities = resourceForm.facilities.trim();
     const capacity = Number(resourceForm.capacity);
 
     if (
@@ -957,6 +1025,11 @@ export default function AdminDashboardClient({
       return;
     }
 
+    if (facilities.length > 500) {
+      setError("Facilities must be 500 characters or fewer.");
+      return;
+    }
+
     if (resourceForm.images.length > MAX_RESOURCE_IMAGES) {
       setError(`Add up to ${MAX_RESOURCE_IMAGES} photos.`);
       return;
@@ -975,6 +1048,7 @@ export default function AdminDashboardClient({
           location,
           capacity,
           description: description || null,
+          facilities: facilities || null,
           images: resourceForm.images,
         }),
       });
@@ -1005,6 +1079,7 @@ export default function AdminDashboardClient({
       location: resource.location,
       capacity: String(resource.capacity),
       description: resource.description ?? "",
+      facilities: resource.facilities ?? "",
       images: resource.images,
       status: resource.status,
     });
@@ -1048,6 +1123,7 @@ export default function AdminDashboardClient({
     const name = resourceForm.name.trim();
     const location = resourceForm.location.trim();
     const description = resourceForm.description.trim();
+    const facilities = resourceForm.facilities.trim();
     const capacity = Number(resourceForm.capacity);
 
     const currentResource = data.resources.find(
@@ -1086,6 +1162,11 @@ export default function AdminDashboardClient({
       return;
     }
 
+    if (facilities.length > 500) {
+      setError("Facilities must be 500 characters or fewer.");
+      return;
+    }
+
     if (resourceForm.images.length > MAX_RESOURCE_IMAGES) {
       setError(`Add up to ${MAX_RESOURCE_IMAGES} photos.`);
       return;
@@ -1104,6 +1185,7 @@ export default function AdminDashboardClient({
           location,
           capacity,
           description: description || null,
+          facilities: facilities || null,
           images: resourceForm.images,
           status: resourceForm.status,
         }),
@@ -1131,7 +1213,28 @@ export default function AdminDashboardClient({
     setError("");
     setSuccess("");
 
-    const confirmed = window.confirm(`Delete ${resource.name}?`);
+    const openBookings = data.reservations.filter(
+      (reservation) =>
+        reservation.resourceId === resource.id &&
+        (reservation.status === "CONFIRMED" ||
+          reservation.status === "PENDING") &&
+        reservation.timing !== "past"
+    );
+
+    if (resource.status === "INACTIVE" && openBookings.length > 0) {
+      setError(
+        `${resource.name} still has upcoming reservations. You can delete it after they are finished.`
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      resource.status === "INACTIVE"
+        ? `Delete ${resource.name}? Upcoming reservations are finished. This removes the resource and its finished reservations.`
+        : openBookings.length > 0
+          ? `Mark ${resource.name} as unavailable? You can delete it after the upcoming reservations are finished.`
+          : `Mark ${resource.name} as unavailable? You can delete it after that.`
+    );
 
     if (!confirmed) {
       return;
@@ -1149,7 +1252,7 @@ export default function AdminDashboardClient({
         throw new Error(payload.message || "Unable to delete this resource.");
       }
 
-      setSuccess(payload.message || `${resource.name} was deleted.`);
+      setSuccess(payload.message || `${resource.name} was updated.`);
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -1733,10 +1836,13 @@ export default function AdminDashboardClient({
             {section === "pending" && (
               <PendingRequests
                 requests={pendingReservations}
+                adminId={data.admin.id}
                 search={pendingSearch}
                 reviewingId={reviewingId}
+                deletingId={deletingReservationId}
                 onSearch={setPendingSearch}
                 onReview={(id, status) => void handleReview(id, status)}
+                onDelete={handleDeleteReservation}
               />
             )}
 
@@ -1744,6 +1850,7 @@ export default function AdminDashboardClient({
               <ReservationsPanel
                 reservations={data.reservations}
                 visible={managedReservations}
+                adminId={data.admin.id}
                 resources={data.resources}
                 search={reservationSearch}
                 status={reservationFilter}
@@ -1754,6 +1861,7 @@ export default function AdminDashboardClient({
                 weekStart={weekStart}
                 weekEnd={weekEnd}
                 reviewingId={reviewingId}
+                deletingId={deletingReservationId}
                 onSearch={(value) => {
                   setReservationSearch(value);
                   setReservationPage(1);
@@ -1779,10 +1887,39 @@ export default function AdminDashboardClient({
                   setWeekAnchor((current) => addDays(current, days))
                 }
                 onReview={(id, status) => void handleReview(id, status)}
+                onDelete={handleDeleteReservation}
               />
             )}
             {section === "reports" && (
               <section className="grid gap-4 xl:grid-cols-5">
+                <article className="rounded-2xl border border-[#E8EEF5] bg-white p-5 shadow-[0_8px_24px_rgba(15,42,68,0.04)] xl:col-span-5">
+                  <h2 className="text-base font-semibold text-slate-700">
+                    Download reports
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-400">
+                    Save a spreadsheet of every user, reservation, or resource.
+                    Passwords are not included.
+                  </p>
+                  <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                    <ReportDownload
+                      title="All user details"
+                      detail={`${data.users.length} ${data.users.length === 1 ? "user" : "users"}`}
+                      onDownload={() => downloadUsersReport(data.users)}
+                    />
+                    <ReportDownload
+                      title="All reservation details"
+                      detail={`${data.reservations.length} ${data.reservations.length === 1 ? "reservation" : "reservations"}`}
+                      onDownload={() =>
+                        downloadReservationsReport(data.reservations)
+                      }
+                    />
+                    <ReportDownload
+                      title="All resource details"
+                      detail={`${data.resources.length} ${data.resources.length === 1 ? "resource" : "resources"}`}
+                      onDownload={() => downloadResourcesReport(data.resources)}
+                    />
+                  </div>
+                </article>
                 <article className="rounded-2xl border border-[#E8EEF5] bg-white p-5 shadow-[0_8px_24px_rgba(15,42,68,0.04)] xl:col-span-3">
                   <h2 className="text-base font-semibold text-slate-700">
                     Bookings by day
@@ -2389,8 +2526,17 @@ function UsersPanel({
                         {user.id !== currentUserId && (
                           <button
                             type="button"
-                            aria-label={`Delete ${user.name}`}
-                            disabled={deletingUserId !== null}
+                            aria-label={
+                              user.isActive
+                                ? `Deactivate ${user.name}`
+                                : `${user.name} is already inactive`
+                            }
+                            title={
+                              user.isActive
+                                ? "Deactivate account"
+                                : "Already inactive"
+                            }
+                            disabled={deletingUserId !== null || !user.isActive}
                             onClick={() => onDelete(user)}
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#FECACA] text-rose-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60"
                           >
@@ -3033,6 +3179,12 @@ function ResourceDialog({
                 {resource.status === "ACTIVE" ? "Available" : "Not Available"}
               </dd>
             </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-slate-400">Facilities</dt>
+              <dd className="text-right font-medium text-slate-700">
+                {resource.facilities?.trim() || "Not listed"}
+              </dd>
+            </div>
             {resource.description && (
               <div>
                 <dt className="text-slate-400">Description</dt>
@@ -3235,6 +3387,23 @@ function ResourceDialog({
             </select>
           </label>
         )}
+
+        <label className="mt-4 block text-sm font-medium text-slate-700">
+          Facilities
+          <textarea
+            value={form.facilities}
+            onChange={(event) =>
+              onChange({ ...form, facilities: event.target.value })
+            }
+            maxLength={500}
+            rows={2}
+            className={`${inputClass} mt-2 resize-y`}
+            placeholder="Wi-Fi, projector, air conditioning"
+          />
+          <span className="mt-1 block text-xs font-normal leading-5 text-slate-500">
+            Optional. Shown on the resource details page. Separate items with commas.
+          </span>
+        </label>
 
         <label className="mt-4 block text-sm font-medium text-slate-700">
           Description
@@ -3450,6 +3619,7 @@ function StatCard({
 function ReservationsPanel({
   reservations,
   visible,
+  adminId,
   resources,
   search,
   status,
@@ -3460,6 +3630,7 @@ function ReservationsPanel({
   weekStart,
   weekEnd,
   reviewingId,
+  deletingId,
   onSearch,
   onStatus,
   onResource,
@@ -3468,9 +3639,11 @@ function ReservationsPanel({
   onPage,
   onShiftWeek,
   onReview,
+  onDelete,
 }: {
   reservations: AdminDashboardData["reservations"];
   visible: AdminDashboardData["reservations"];
+  adminId: string;
   resources: AdminDashboardData["resources"];
   search: string;
   status: ReservationFilter;
@@ -3481,6 +3654,7 @@ function ReservationsPanel({
   weekStart: Date;
   weekEnd: Date;
   reviewingId: string;
+  deletingId: string;
   onSearch: (value: string) => void;
   onStatus: (value: ReservationFilter) => void;
   onResource: (value: string) => void;
@@ -3489,6 +3663,9 @@ function ReservationsPanel({
   onPage: (page: number) => void;
   onShiftWeek: (days: number) => void;
   onReview: (id: string, status: "CONFIRMED" | "CANCELLED") => void;
+  onDelete: (
+    reservation: AdminDashboardData["reservations"][number]
+  ) => Promise<boolean>;
 }) {
   const [viewId, setViewId] = useState<string | null>(null);
   const previousStart = addDays(weekStart, -7);
@@ -3767,7 +3944,10 @@ function ReservationsPanel({
                             <IconAction
                               label={`Approve ${reservation.title}`}
                               tone="success"
-                              disabled={reviewingId === reservation.id}
+                              disabled={
+                                reviewingId === reservation.id ||
+                                deletingId === reservation.id
+                              }
                               onClick={() =>
                                 onReview(reservation.id, "CONFIRMED")
                               }
@@ -3775,11 +3955,16 @@ function ReservationsPanel({
                               <CheckIcon />
                             </IconAction>
                           )}
-                          {reservation.status === "CONFIRMED" && canChange && (
+                          {reservation.status === "CONFIRMED" &&
+                            canChange &&
+                            !isUserConfirmedBooking(reservation, adminId) && (
                             <IconAction
                               label={`Cancel ${reservation.title}`}
                               tone="danger"
-                              disabled={reviewingId === reservation.id}
+                              disabled={
+                                reviewingId === reservation.id ||
+                                deletingId === reservation.id
+                              }
                               onClick={() => {
                                 if (
                                   window.confirm(
@@ -3790,17 +3975,33 @@ function ReservationsPanel({
                                 }
                               }}
                             >
-                              <TrashIcon />
+                              <CancelIcon />
                             </IconAction>
                           )}
                           {reservation.status === "PENDING" && canChange && (
                             <IconAction
                               label={`Decline ${reservation.title}`}
                               tone="danger"
-                              disabled={reviewingId === reservation.id}
+                              disabled={
+                                reviewingId === reservation.id ||
+                                deletingId === reservation.id
+                              }
                               onClick={() =>
                                 onReview(reservation.id, "CANCELLED")
                               }
+                            >
+                              <CancelIcon />
+                            </IconAction>
+                          )}
+                          {!isUserConfirmedBooking(reservation, adminId) && (
+                            <IconAction
+                              label={`Delete ${reservation.title}`}
+                              tone="danger"
+                              disabled={
+                                reviewingId === reservation.id ||
+                                deletingId === reservation.id
+                              }
+                              onClick={() => void onDelete(reservation)}
                             >
                               <TrashIcon />
                             </IconAction>
@@ -3856,70 +4057,15 @@ function ReservationsPanel({
       </div>
 
       {viewed && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              setViewId(null);
-            }
-          }}
-        >
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-bold text-slate-800">{viewed.title}</h2>
-            <p className="mt-1 text-sm text-slate-400">
-              {viewed.userName} · {viewed.userEmail}
-            </p>
-            <dl className="mt-5 space-y-3 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-400">Resource</dt>
-                <dd className="text-right font-medium text-slate-700">
-                  {viewed.resourceName}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-400">Location</dt>
-                <dd className="text-right font-medium text-slate-700">
-                  {viewed.resourceLocation}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-400">When</dt>
-                <dd className="text-right font-medium text-slate-700">
-                  {formatRange(viewed.startTime, viewed.endTime)}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-slate-400">Status</dt>
-                <dd>
-                  <ReservationStatus status={viewed.status} />
-                </dd>
-              </div>
-              {viewed.purpose && (
-                <div>
-                  <dt className="text-slate-400">Purpose</dt>
-                  <dd className="mt-1 text-slate-700">{viewed.purpose}</dd>
-                </div>
-              )}
-              {viewed.participants.length > 0 && (
-                <div>
-                  <dt className="text-slate-400">Participants</dt>
-                  <dd className="mt-1 text-slate-700">
-                    {viewed.participants.map((person) => person.name).join(", ")}
-                  </dd>
-                </div>
-              )}
-            </dl>
-            <div className="mt-6 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setViewId(null)}
-                className="rounded-xl border border-[#E2EAF3] px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+        <BookingDetailsDialog
+          reservation={viewed}
+          adminId={adminId}
+          reviewingId={reviewingId}
+          deletingId={deletingId}
+          onClose={() => setViewId(null)}
+          onReview={onReview}
+          onDelete={onDelete}
+        />
       )}
     </section>
   );
@@ -3974,6 +4120,7 @@ function IconAction({
   return (
     <button
       type="button"
+      title={label}
       aria-label={label}
       disabled={disabled}
       onClick={onClick}
@@ -4028,17 +4175,26 @@ function formatDuration(startIso: string, endIso: string) {
 
 function PendingRequests({
   requests,
+  adminId,
   search,
   reviewingId,
+  deletingId,
   onSearch,
   onReview,
+  onDelete,
 }: {
   requests: AdminDashboardData["reservations"];
+  adminId: string;
   search: string;
   reviewingId: string;
+  deletingId: string;
   onSearch: (value: string) => void;
   onReview: (id: string, status: "CONFIRMED" | "CANCELLED") => void;
+  onDelete: (
+    reservation: AdminDashboardData["reservations"][number]
+  ) => Promise<boolean>;
 }) {
+  const [viewId, setViewId] = useState<string | null>(null);
   const term = search.trim().toLowerCase();
   const rows = requests
     .filter((reservation) => {
@@ -4048,15 +4204,22 @@ function PendingRequests({
 
       return (
         reservation.title.toLowerCase().includes(term) ||
+        (reservation.purpose ?? "").toLowerCase().includes(term) ||
         reservation.userName.toLowerCase().includes(term) ||
         reservation.userEmail.toLowerCase().includes(term) ||
-        reservation.resourceName.toLowerCase().includes(term)
+        reservation.resourceName.toLowerCase().includes(term) ||
+        reservation.participants.some(
+          (person) =>
+            person.name.toLowerCase().includes(term) ||
+            person.email.toLowerCase().includes(term)
+        )
       );
     })
     .sort(
       (a, b) =>
         new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
     );
+  const viewed = requests.find((reservation) => reservation.id === viewId);
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-3">
@@ -4120,6 +4283,13 @@ function PendingRequests({
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
+                          onClick={() => setViewId(reservation.id)}
+                          className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                        >
+                          Details
+                        </button>
+                        <button
+                          type="button"
                           disabled={reviewingId === reservation.id}
                           onClick={() => onReview(reservation.id, "CONFIRMED")}
                           className="rounded-lg bg-[#3B82F6] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#2563EB] disabled:opacity-60"
@@ -4145,7 +4315,268 @@ function PendingRequests({
           </div>
         )}
       </div>
+      {viewed && (
+        <BookingDetailsDialog
+          reservation={viewed}
+          adminId={adminId}
+          reviewingId={reviewingId}
+          deletingId={deletingId}
+          onClose={() => setViewId(null)}
+          onReview={onReview}
+          onDelete={onDelete}
+        />
+      )}
     </section>
+  );
+}
+
+function BookingDetailsDialog({
+  reservation,
+  adminId,
+  reviewingId,
+  deletingId,
+  onClose,
+  onReview,
+  onDelete,
+}: {
+  reservation: AdminDashboardData["reservations"][number];
+  adminId: string;
+  reviewingId: string;
+  deletingId: string;
+  onClose: () => void;
+  onReview: (id: string, status: "CONFIRMED" | "CANCELLED") => void;
+  onDelete: (
+    reservation: AdminDashboardData["reservations"][number]
+  ) => Promise<boolean>;
+}) {
+  const category = categoryLabel(reservation.resourceCategory);
+  const subcategory = subcategoryLabel(reservation.resourceSubcategory);
+  const requested = formatSlot(reservation.createdAt, reservation.createdAt);
+  const updated = formatSlot(reservation.updatedAt, reservation.updatedAt);
+  const canChange = reservation.timing !== "past";
+  const locked = isUserConfirmedBooking(reservation, adminId);
+  const reviewing = reviewingId === reservation.id;
+  const deleting = deletingId === reservation.id;
+  const busy = reviewing || deleting;
+  const partySize = 1 + reservation.participants.length;
+  const timingLabel = {
+    upcoming: "Upcoming",
+    in_progress: "In progress",
+    past: "Ended",
+  }[reservation.timing];
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="booking-details-title"
+        className="flex max-h-[min(90vh,760px)] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4 border-b border-[#F1F5F9] px-6 py-5">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Booking details
+            </p>
+            <h2
+              id="booking-details-title"
+              className="mt-1 text-lg font-bold text-slate-800"
+            >
+              {reservation.title}
+            </h2>
+            <p className="mt-1 text-sm text-slate-400">{timingLabel}</p>
+          </div>
+          <ReservationStatus status={reservation.status} />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
+            <DetailField label="Booked by" value={reservation.userName}>
+              {reservation.userEmail}
+            </DetailField>
+            <DetailField
+              label="Position"
+              value={jobPositionLabel(reservation.userJobPosition)}
+            />
+            <DetailField label="Resource" value={reservation.resourceName}>
+              {category} · {subcategory}
+            </DetailField>
+            <DetailField label="Location" value={reservation.resourceLocation} />
+            <DetailField
+              label="When"
+              value={formatRange(reservation.startTime, reservation.endTime)}
+            />
+            <DetailField
+              label="Duration"
+              value={formatDuration(reservation.startTime, reservation.endTime)}
+            />
+            <DetailField
+              label="People"
+              value={`${partySize} of ${reservation.resourceCapacity}`}
+            >
+              Including the person who booked
+            </DetailField>
+            <DetailField label="Requested" value={requested.day}>
+              {requested.time}
+            </DetailField>
+            <DetailField label="Last updated" value={updated.day}>
+              {updated.time}
+            </DetailField>
+          </dl>
+          <div className="mt-5">
+            <p className="text-xs font-medium text-slate-400">Purpose</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+              {reservation.purpose?.trim() || "No purpose was entered."}
+            </p>
+          </div>
+          {(reservation.resourceFacilities?.trim() ||
+            reservation.resourceDescription?.trim()) && (
+            <div className="mt-5 grid gap-4 sm:grid-cols-2">
+              {reservation.resourceFacilities?.trim() && (
+                <div>
+                  <p className="text-xs font-medium text-slate-400">Facilities</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {reservation.resourceFacilities.trim()}
+                  </p>
+                </div>
+              )}
+              {reservation.resourceDescription?.trim() && (
+                <div>
+                  <p className="text-xs font-medium text-slate-400">
+                    Resource description
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                    {reservation.resourceDescription.trim()}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="mt-5">
+            <p className="text-xs font-medium text-slate-400">
+              People on this booking
+            </p>
+            <ul className="mt-2 divide-y divide-[#F1F5F9] rounded-xl border border-[#E8EEF5]">
+              <li className="px-3 py-2.5">
+                <p className="text-sm font-semibold text-slate-700">
+                  {reservation.userName}
+                </p>
+                <p className="text-xs text-slate-400">
+                  {reservation.userEmail} · Booked this resource
+                </p>
+              </li>
+              {reservation.participants.map((person) => (
+                <li key={`${person.email}-${person.name}`} className="px-3 py-2.5">
+                  <p className="text-sm font-semibold text-slate-700">
+                    {person.name}
+                  </p>
+                  <p className="text-xs text-slate-400">{person.email}</p>
+                </li>
+              ))}
+            </ul>
+            {reservation.participants.length === 0 && (
+              <p className="mt-2 text-sm text-slate-500">
+                No other people were added.
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-[#F1F5F9] px-6 py-4">
+          {!locked && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                void onDelete(reservation).then((removed) => {
+                  if (removed) {
+                    onClose();
+                  }
+                });
+              }}
+              className="mr-auto rounded-xl border border-[#FECACA] px-4 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+            >
+              {deleting ? "Deleting..." : "Delete"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-[#E2EAF3] px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+          >
+            Close
+          </button>
+          {reservation.status === "CONFIRMED" && canChange && !locked && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                if (window.confirm(`Cancel ${reservation.title}?`)) {
+                  onReview(reservation.id, "CANCELLED");
+                }
+              }}
+              className="rounded-xl border border-[#FECACA] px-4 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 disabled:opacity-60"
+            >
+              {reviewing ? "Saving..." : "Cancel booking"}
+            </button>
+          )}
+          {reservation.status === "PENDING" && canChange && (
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onReview(reservation.id, "CANCELLED")}
+                className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {reviewing ? "Saving..." : "Decline"}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onReview(reservation.id, "CONFIRMED")}
+                className="rounded-xl bg-[#3B82F6] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#2563EB] disabled:opacity-60"
+              >
+                {reviewing ? "Saving..." : "Approve"}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DetailField({
+  label,
+  value,
+  children,
+}: {
+  label: string;
+  value: string;
+  children?: ReactNode;
+}) {
+  return (
+    <div>
+      <dt className="text-xs font-medium text-slate-400">{label}</dt>
+      <dd className="mt-1 text-sm font-semibold text-slate-700">{value}</dd>
+      {children && <dd className="text-xs text-slate-400">{children}</dd>}
+    </div>
   );
 }
 
@@ -4375,6 +4806,35 @@ function Badge({
   );
 }
 
+function ReportDownload({
+  title,
+  detail,
+  onDownload,
+}: {
+  title: string;
+  detail: string;
+  onDownload: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onDownload}
+      className="flex items-center justify-between gap-3 rounded-xl border border-[#E2EAF3] bg-[#F8FBFF] px-4 py-3 text-left transition hover:border-[#BFDBFE] hover:bg-[#EFF6FF]"
+    >
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-slate-700">
+          {title}
+        </span>
+        <span className="mt-0.5 block text-xs text-slate-400">{detail}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[#2F7CF6]">
+        <DownloadIcon />
+        CSV
+      </span>
+    </button>
+  );
+}
+
 function EmptyState({ title, detail }: { title: string; detail: string }) {
   return (
     <div className="mt-5 rounded-xl border border-dashed border-[#E2EAF3] px-4 py-8 text-center">
@@ -4465,6 +4925,25 @@ function ChartIcon() {
       <path d="M16 20v-7" />
       <path d="M22 20H2" />
     </IconFrame>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="h-4 w-4"
+      aria-hidden="true"
+    >
+      <path d="M12 4v11" />
+      <path d="m7 11 5 5 5-5" />
+      <path d="M5 20h14" />
+    </svg>
   );
 }
 
@@ -4953,4 +5432,156 @@ function relativeTime(iso: string) {
   }
 
   return formatShort(iso).split(",")[0];
+}
+
+function downloadUsersReport(users: AdminDashboardData["users"]) {
+  downloadCsv(
+    `users-${reportStamp()}.csv`,
+    [
+      "Name",
+      "Email",
+      "Role",
+      "Job position",
+      "Status",
+      "Locked until",
+      "Joined",
+    ],
+    users.map((user) => [
+      user.name,
+      user.email,
+      user.role === "ADMIN" ? "Admin" : "Member",
+      jobPositionLabel(user.jobPosition),
+      user.isActive ? "Active" : "Inactive",
+      user.lockedUntil ? formatReportDate(user.lockedUntil) : "",
+      formatReportDate(user.createdAt),
+    ])
+  );
+}
+
+function downloadReservationsReport(
+  reservations: AdminDashboardData["reservations"]
+) {
+  downloadCsv(
+    `reservations-${reportStamp()}.csv`,
+    [
+      "Title",
+      "Purpose",
+      "Status",
+      "Start",
+      "End",
+      "Booked by",
+      "Booker email",
+      "Job position",
+      "Resource",
+      "Category",
+      "Subcategory",
+      "Location",
+      "Capacity",
+      "Participants",
+      "Created",
+      "Updated",
+    ],
+    reservations.map((reservation) => [
+      reservation.title,
+      reservation.purpose ?? "",
+      reservationStatusLabel(reservation.status),
+      formatReportDate(reservation.startTime),
+      formatReportDate(reservation.endTime),
+      reservation.userName,
+      reservation.userEmail,
+      jobPositionLabel(reservation.userJobPosition),
+      reservation.resourceName,
+      categoryLabel(reservation.resourceCategory),
+      subcategoryLabel(reservation.resourceSubcategory),
+      reservation.resourceLocation,
+      String(reservation.resourceCapacity),
+      reservation.participants
+        .map((participant) => `${participant.name} <${participant.email}>`)
+        .join("; "),
+      formatReportDate(reservation.createdAt),
+      formatReportDate(reservation.updatedAt),
+    ])
+  );
+}
+
+function downloadResourcesReport(resources: AdminDashboardData["resources"]) {
+  downloadCsv(
+    `resources-${reportStamp()}.csv`,
+    [
+      "Name",
+      "Category",
+      "Subcategory",
+      "Location",
+      "Capacity",
+      "Status",
+      "Description",
+      "Facilities",
+      "Images",
+      "Created",
+      "Updated",
+    ],
+    resources.map((resource) => [
+      resource.name,
+      categoryLabel(resource.category),
+      subcategoryLabel(resource.subcategory),
+      resource.location,
+      String(resource.capacity),
+      resource.status === "ACTIVE" ? "Active" : "Inactive",
+      resource.description ?? "",
+      resource.facilities ?? "",
+      String(resource.images.length),
+      formatReportDate(resource.createdAt),
+      formatReportDate(resource.updatedAt),
+    ])
+  );
+}
+
+function reservationStatusLabel(
+  status: AdminDashboardData["reservations"][number]["status"]
+) {
+  if (status === "CONFIRMED") return "Confirmed";
+  if (status === "PENDING") return "Pending";
+  return "Cancelled";
+}
+
+function downloadCsv(filename: string, headers: string[], rows: string[][]) {
+  const lines = [headers, ...rows].map((row) => row.map(csvCell).join(","));
+  const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string) {
+  if (/[",\r\n]/.test(value)) {
+    return `"${value.replaceAll('"', '""')}"`;
+  }
+
+  return value;
+}
+
+function reportStamp() {
+  const date = new Date();
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+function formatReportDate(iso: string) {
+  const date = new Date(iso);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const pad = (value: number) => String(value).padStart(2, "0");
+
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }

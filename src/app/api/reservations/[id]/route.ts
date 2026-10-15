@@ -17,7 +17,7 @@ import {
   maxBookingDurationMs,
 } from "@/lib/resource-catalog";
 import { prisma } from "@/lib/prisma";
-import { requireAuth } from "@/lib/require-auth";
+import { requireAdmin, requireAuth } from "@/lib/require-auth";
 import {
   ParticipantInputError,
   assertParticipantCapacity,
@@ -127,6 +127,20 @@ export async function PATCH(
         return NextResponse.json(
           { message: "This reservation is already cancelled." },
           { status: 400 }
+        );
+      }
+
+      if (
+        reservation.status === "CONFIRMED" &&
+        auth.user.role === "ADMIN" &&
+        reservation.userId !== auth.user.id
+      ) {
+        return NextResponse.json(
+          {
+            message:
+              "A confirmed booking made by a user cannot be cancelled.",
+          },
+          { status: 403 }
         );
       }
 
@@ -254,6 +268,122 @@ export async function PATCH(
 
     return NextResponse.json(
       { message: "Failed to update the reservation." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const auth = await requireAdmin();
+
+    if (!auth.ok) {
+      return NextResponse.json(
+        { message: auth.message },
+        { status: auth.status }
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id || id.length > 64) {
+      return NextResponse.json(
+        { message: "A valid reservation is required." },
+        { status: 400 }
+      );
+    }
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        userId: true,
+        title: true,
+        status: true,
+        startTime: true,
+        endTime: true,
+        user: { select: { name: true, email: true } },
+        resource: { select: { name: true, location: true } },
+        participants: { select: { name: true, email: true } },
+      },
+    });
+
+    if (!reservation) {
+      return NextResponse.json(
+        { message: "Reservation not found." },
+        { status: 404 }
+      );
+    }
+
+    if (reservation.status === "CONFIRMED" && reservation.userId !== auth.user.id) {
+      return NextResponse.json(
+        {
+          message: "A confirmed booking made by a user cannot be deleted.",
+        },
+        { status: 403 }
+      );
+    }
+
+    await prisma.reservation.delete({ where: { id: reservation.id } });
+
+    const stillActive =
+      reservation.status !== "CANCELLED" &&
+      reservation.endTime.getTime() > Date.now();
+    let message = "Reservation deleted.";
+
+    if (stillActive) {
+      const whenLabel = formatBookingWindow(
+        reservation.startTime,
+        reservation.endTime,
+        "Asia/Colombo"
+      );
+      const booking = {
+        bookerName: reservation.user.name,
+        resourceName: reservation.resource.name,
+        location: reservation.resource.location,
+        title: reservation.title,
+        whenLabel,
+        appUrl: appUrlFrom(request),
+      };
+
+      if (
+        reservation.status === "CONFIRMED" &&
+        reservation.participants.length > 0
+      ) {
+        message += await emailCancellation(reservation.participants, booking);
+      }
+
+      message += await emailBooker(request, {
+        to: reservation.user.email,
+        name: reservation.user.name,
+        resourceName: reservation.resource.name,
+        location: reservation.resource.location,
+        title: reservation.title,
+        whenLabel,
+        outcome: reservation.status === "PENDING" ? "declined" : "cancelled",
+        sentToActor: reservation.user.email === auth.user.email,
+      });
+    }
+
+    return NextResponse.json({ message });
+  } catch (error) {
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return NextResponse.json(
+        { message: "Reservation not found." },
+        { status: 404 }
+      );
+    }
+
+    console.error("Failed to delete reservation:", error);
+
+    return NextResponse.json(
+      { message: "Failed to delete the reservation." },
       { status: 500 }
     );
   }
