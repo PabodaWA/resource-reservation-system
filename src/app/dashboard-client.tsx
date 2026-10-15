@@ -81,7 +81,7 @@ type Section =
   | "reservations"
   | "notifications"
   | "profile";
-type ReservationFilter = "all" | "upcoming" | "pending" | "past" | "cancelled";
+type ReservationFilter = "upcoming" | "pending" | "past" | "cancelled";
 type DateWindow = "all" | "today" | "week" | "month";
 type BrowseSort = "az" | "za" | "capacity";
 type Availability = "Available" | "Limited" | "Unavailable";
@@ -148,7 +148,7 @@ export default function DashboardClient({
 }) {
   const router = useRouter();
   const [section, setSection] = useState<Section>("overview");
-  const [filter, setFilter] = useState<ReservationFilter>("all");
+  const [filter, setFilter] = useState<ReservationFilter>("upcoming");
   const [dateWindow, setDateWindow] = useState<DateWindow>("all");
   const [search, setSearch] = useState("");
   const [booking, setBooking] = useState(() => ({
@@ -234,10 +234,6 @@ export default function DashboardClient({
 
     return data.reservations
       .filter((reservation) => {
-        if (filter === "all") {
-          return true;
-        }
-
         if (filter === "cancelled") {
           return reservation.status === "CANCELLED";
         }
@@ -274,14 +270,6 @@ export default function DashboardClient({
         );
       })
       .sort((a, b) => {
-        if (filter === "all") {
-          const rank = reservationListRank(a) - reservationListRank(b);
-
-          if (rank !== 0) {
-            return rank;
-          }
-        }
-
         const aTime = new Date(a.startTime).getTime();
         const bTime = new Date(b.startTime).getTime();
         const newestFirst = filter === "past" || filter === "cancelled";
@@ -681,7 +669,7 @@ export default function DashboardClient({
         throw new Error(payload.message || "Unable to cancel this reservation.");
       }
 
-      setSuccess("Reservation cancelled.");
+      setSuccess(payload.message || "Reservation cancelled.");
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
@@ -861,7 +849,7 @@ export default function DashboardClient({
                   type="button"
                   onClick={() =>
                     item.id === "reservations"
-                      ? showReservations("all")
+                      ? showReservations("upcoming")
                       : openSection(item.id)
                   }
                   className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition ${
@@ -1054,7 +1042,7 @@ export default function DashboardClient({
                     type="button"
                     onClick={() =>
                     item.id === "reservations"
-                      ? showReservations("all")
+                      ? showReservations("upcoming")
                       : openSection(item.id)
                   }
                     className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${
@@ -1126,7 +1114,7 @@ export default function DashboardClient({
                         </button>
                         <button
                           type="button"
-                          onClick={() => showReservations("all")}
+                          onClick={() => showReservations("upcoming")}
                           className="inline-flex items-center gap-2 rounded-xl border border-[#bfdbfe] bg-white/80 px-4 py-2.5 text-sm font-semibold text-[#2563eb] transition hover:bg-white"
                         >
                           <CalendarGlyph className="h-4 w-4" />
@@ -1250,7 +1238,7 @@ export default function DashboardClient({
                         icon={<CalendarGlyph className="h-4 w-4" />}
                         title="My Reservations"
                         detail="View and manage your bookings"
-                        onClick={() => showReservations("all")}
+                        onClick={() => showReservations("upcoming")}
                       />
                       <QuickAction
                         icon={<ClockGlyph className="h-4 w-4" />}
@@ -1754,7 +1742,6 @@ export default function DashboardClient({
                   <div className="flex flex-wrap gap-2">
                     {(
                       [
-                        ["all", "All Reservations"],
                         ["upcoming", "Upcoming"],
                         ["pending", "Pending"],
                         ["past", "Completed"],
@@ -1809,17 +1796,13 @@ export default function DashboardClient({
                           ? "You do not have an upcoming booking yet."
                           : filter === "pending"
                             ? "You do not have a booking waiting for approval."
-                            : filter === "all"
-                              ? "You do not have any reservations yet."
-                              : "Nothing matches this view."
+                            : "Nothing matches this view."
                       }
                       actionLabel={
-                        filter === "upcoming" || filter === "all"
-                          ? "Browse resources"
-                          : undefined
+                        filter === "upcoming" ? "Browse resources" : undefined
                       }
                       onAction={
-                        filter === "upcoming" || filter === "all"
+                        filter === "upcoming"
                           ? () => openSection("book")
                           : undefined
                       }
@@ -5082,22 +5065,6 @@ function buildActivity(reservations: Reservation[]) {
       };
     })
     .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
-}
-
-function reservationListRank(reservation: Reservation) {
-  if (reservation.status === "CONFIRMED" && reservation.timing !== "past") {
-    return 0;
-  }
-
-  if (reservation.status === "PENDING") {
-    return 1;
-  }
-
-  if (reservation.status === "CONFIRMED") {
-    return 2;
-  }
-
-  return 3;
 }
 
 function inDateWindow(iso: string, window: DateWindow) {

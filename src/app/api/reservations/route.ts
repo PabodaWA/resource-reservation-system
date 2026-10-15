@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
-import { isMailConfigured, sendParticipantNotice } from "@/lib/mail";
+import {
+  appUrlFrom,
+  emailBooker,
+  isMailConfigured,
+  sendParticipantNotice,
+} from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/require-auth";
 import {
@@ -303,7 +308,7 @@ export async function POST(request: Request) {
             status: true,
             startTime: true,
             endTime: true,
-            user: { select: { name: true } },
+            user: { select: { name: true, email: true } },
             resource: { select: { name: true, location: true, category: true } },
             participants: { select: { name: true, email: true } },
           },
@@ -341,6 +346,7 @@ export async function POST(request: Request) {
               location: reservation.resource.location,
               title: reservation.title,
               whenLabel,
+              appUrl: appUrlFrom(request),
             })
           )
         );
@@ -373,6 +379,21 @@ export async function POST(request: Request) {
           " The booking is saved, but the email notice could not be sent.";
       }
     }
+
+    message += await emailBooker(request, {
+      to: reservation.user.email,
+      name: reservation.user.name,
+      resourceName: reservation.resource.name,
+      location: reservation.resource.location,
+      title: reservation.title,
+      whenLabel: formatBookingWindow(
+        reservation.startTime,
+        reservation.endTime,
+        timeZone
+      ),
+      outcome: awaitingApproval ? "pending" : "confirmed",
+      sentToActor: reservation.user.email === auth.user.email,
+    });
 
     return NextResponse.json(
       { id: reservation.id, message },

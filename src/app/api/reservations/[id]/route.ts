@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
-import { isMailConfigured, sendParticipantNotice } from "@/lib/mail";
+import {
+  appUrlFrom,
+  emailBooker,
+  isMailConfigured,
+  sendParticipantCancellation,
+  sendParticipantNotice,
+} from "@/lib/mail";
 import {
   MIN_BOOKING_MS,
   VEHICLE_MAX_BOOKING_MS,
@@ -93,7 +99,7 @@ export async function PATCH(
         status: true,
         startTime: true,
         endTime: true,
-        user: { select: { name: true } },
+        user: { select: { name: true, email: true } },
         resource: { select: { name: true, location: true } },
         participants: { select: { name: true, email: true } },
       },
@@ -134,11 +140,44 @@ export async function PATCH(
         auth.user.role === "ADMIN" &&
         reservation.userId !== auth.user.id;
 
-      return NextResponse.json({
-        message: declinedByAdmin
-          ? "The approval request was declined."
-          : "Reservation cancelled.",
+      let message = declinedByAdmin
+        ? "The approval request was declined."
+        : "Reservation cancelled.";
+      const whenLabel = formatBookingWindow(
+        reservation.startTime,
+        reservation.endTime,
+        "Asia/Colombo"
+      );
+
+      if (
+        reservation.status === "CONFIRMED" &&
+        reservation.participants.length > 0
+      ) {
+        message += await emailCancellation(
+          reservation.participants,
+          {
+            bookerName: reservation.user.name,
+            resourceName: reservation.resource.name,
+            location: reservation.resource.location,
+            title: reservation.title,
+            whenLabel,
+            appUrl: appUrlFrom(request),
+          }
+        );
+      }
+
+      message += await emailBooker(request, {
+        to: reservation.user.email,
+        name: reservation.user.name,
+        resourceName: reservation.resource.name,
+        location: reservation.resource.location,
+        title: reservation.title,
+        whenLabel,
+        outcome: declinedByAdmin ? "declined" : "cancelled",
+        sentToActor: reservation.user.email === auth.user.email,
       });
+
+      return NextResponse.json({ message });
     }
 
     if (reservation.status !== "PENDING") {
@@ -198,6 +237,7 @@ export async function PATCH(
             location: reservation.resource.location,
             title: reservation.title,
             whenLabel,
+            appUrl: appUrlFrom(request),
           })
         )
       );
@@ -228,6 +268,53 @@ type PendingEditBody = {
   notifyParticipants?: unknown;
   timeZone?: unknown;
 };
+
+async function emailCancellation(
+  participants: { name: string; email: string }[],
+  booking: {
+    bookerName: string;
+    resourceName: string;
+    location: string;
+    title: string;
+    whenLabel: string;
+    appUrl: string;
+  }
+) {
+  if (!isMailConfigured()) {
+    return participants.length === 1
+      ? " The cancellation email could not be sent."
+      : " The cancellation emails could not be sent.";
+  }
+
+  const results = await Promise.allSettled(
+    participants.map((person) =>
+      sendParticipantCancellation({
+        to: person.email,
+        name: person.name,
+        ...booking,
+      })
+    )
+  );
+  const notified = results.filter((result) => result.status === "fulfilled").length;
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error("Failed to send cancellation email:", result.reason);
+    }
+  }
+
+  if (notified === participants.length) {
+    return " They were emailed that this booking was cancelled.";
+  }
+
+  if (notified > 0) {
+    return " Some cancellation emails could not be sent.";
+  }
+
+  return participants.length === 1
+    ? " The cancellation email could not be sent."
+    : " The cancellation emails could not be sent.";
+}
 
 function isPendingEdit(body: unknown): body is PendingEditBody {
   return (
@@ -501,6 +588,7 @@ async function updatePendingReservation(
               location: reservation.resource.location,
               title: reservation.title,
               whenLabel,
+              appUrl: appUrlFrom(request),
             })
           )
         );

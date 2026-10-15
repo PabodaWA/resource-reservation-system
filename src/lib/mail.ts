@@ -18,6 +18,24 @@ export function isMailConfigured(): boolean {
   );
 }
 
+export function appUrlFrom(request: Request): string {
+  const configured = process.env.APP_URL?.trim();
+
+  if (configured) {
+    try {
+      const base = new URL(configured);
+
+      if (base.protocol === "http:" || base.protocol === "https:") {
+        return new URL("/", base).toString();
+      }
+    } catch {
+      // Fall back to the request origin when APP_URL is not a valid URL.
+    }
+  }
+
+  return new URL("/", new URL(request.url).origin).toString();
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -66,6 +84,7 @@ type ParticipantNoticeEmail = {
   location: string;
   title: string;
   whenLabel: string;
+  appUrl: string;
 };
 
 export async function sendParticipantNotice(
@@ -78,6 +97,7 @@ export async function sendParticipantNotice(
   const safeLocation = escapeHtml(input.location);
   const safeTitle = escapeHtml(input.title);
   const safeWhen = escapeHtml(input.whenLabel);
+  const safeAppUrl = escapeHtml(input.appUrl);
 
   await transporter.sendMail({
     from,
@@ -92,7 +112,7 @@ export async function sendParticipantNotice(
       `When: ${input.whenLabel}`,
       `Where: ${input.location}`,
       "",
-      "You do not need to sign in or reply. This note is only to tell you the resource is reserved for that time.",
+      `Check the web application to see this reservation: ${input.appUrl}`,
     ].join("\n"),
     html: `
       <p>Hello ${safeName},</p>
@@ -102,7 +122,159 @@ export async function sendParticipantNotice(
         <strong>When:</strong> ${safeWhen}<br />
         <strong>Where:</strong> ${safeLocation}
       </p>
-      <p>You do not need to sign in or reply. This note is only to tell you the resource is reserved for that time.</p>
+      <p>Check the web application to see this reservation: <a href="${safeAppUrl}">${safeAppUrl}</a></p>
+    `,
+  });
+}
+
+export async function sendParticipantCancellation(
+  input: ParticipantNoticeEmail
+): Promise<void> {
+  const { from, transporter } = await createTransporter();
+  const safeName = escapeHtml(input.name);
+  const safeBooker = escapeHtml(input.bookerName);
+  const safeResource = escapeHtml(input.resourceName);
+  const safeLocation = escapeHtml(input.location);
+  const safeTitle = escapeHtml(input.title);
+  const safeWhen = escapeHtml(input.whenLabel);
+  const safeAppUrl = escapeHtml(input.appUrl);
+
+  await transporter.sendMail({
+    from,
+    to: input.to,
+    subject: `A booking you were included in was cancelled`,
+    text: [
+      `Hello ${input.name},`,
+      "",
+      `The booking for ${input.resourceName} that ${input.bookerName} included you in has been cancelled.`,
+      "",
+      `Title: ${input.title}`,
+      `When: ${input.whenLabel}`,
+      `Where: ${input.location}`,
+      "",
+      `Check the web application to see this reservation: ${input.appUrl}`,
+    ].join("\n"),
+    html: `
+      <p>Hello ${safeName},</p>
+      <p>The booking for <strong>${safeResource}</strong> that ${safeBooker} included you in has been cancelled.</p>
+      <p>
+        <strong>Title:</strong> ${safeTitle}<br />
+        <strong>When:</strong> ${safeWhen}<br />
+        <strong>Where:</strong> ${safeLocation}
+      </p>
+      <p>Check the web application to see this reservation: <a href="${safeAppUrl}">${safeAppUrl}</a></p>
+    `,
+  });
+}
+
+type BookerReservationEmail = {
+  to: string;
+  name: string;
+  resourceName: string;
+  location: string;
+  title: string;
+  whenLabel: string;
+  appUrl: string;
+  outcome: "confirmed" | "pending" | "cancelled" | "declined";
+};
+
+export async function emailBooker(
+  request: Request,
+  input: Omit<BookerReservationEmail, "appUrl"> & { sentToActor: boolean }
+): Promise<string> {
+  const noun =
+    input.outcome === "cancelled" || input.outcome === "declined"
+      ? "cancellation"
+      : "confirmation";
+
+  if (!isMailConfigured()) {
+    return input.sentToActor
+      ? ` Your ${noun} email could not be sent.`
+      : ` Their ${noun} email could not be sent.`;
+  }
+
+  try {
+    await sendBookerReservationEmail({
+      to: input.to,
+      name: input.name,
+      resourceName: input.resourceName,
+      location: input.location,
+      title: input.title,
+      whenLabel: input.whenLabel,
+      outcome: input.outcome,
+      appUrl: appUrlFrom(request),
+    });
+  } catch (error) {
+    console.error(`Failed to send ${noun} email:`, error);
+    return input.sentToActor
+      ? ` Your ${noun} email could not be sent.`
+      : ` Their ${noun} email could not be sent.`;
+  }
+
+  return input.sentToActor
+    ? ` A ${noun} email was sent to you.`
+    : ` A ${noun} email was sent to the person who booked it.`;
+}
+
+export async function sendBookerReservationEmail(
+  input: BookerReservationEmail
+): Promise<void> {
+  const { from, transporter } = await createTransporter();
+  const safeName = escapeHtml(input.name);
+  const safeResource = escapeHtml(input.resourceName);
+  const safeLocation = escapeHtml(input.location);
+  const safeTitle = escapeHtml(input.title);
+  const safeWhen = escapeHtml(input.whenLabel);
+  const safeAppUrl = escapeHtml(input.appUrl);
+  const copy =
+    input.outcome === "pending"
+      ? {
+          subject: "Your resource booking is waiting for approval",
+          lead: `Your booking for ${input.resourceName} was submitted and is waiting for approval.`,
+          safeLead: `Your booking for <strong>${safeResource}</strong> was submitted and is waiting for approval.`,
+        }
+      : input.outcome === "cancelled"
+        ? {
+            subject: "Your resource booking was cancelled",
+            lead: `Your booking for ${input.resourceName} was cancelled.`,
+            safeLead: `Your booking for <strong>${safeResource}</strong> was cancelled.`,
+          }
+        : input.outcome === "declined"
+          ? {
+              subject: "Your resource booking request was declined",
+              lead: `Your booking request for ${input.resourceName} was declined.`,
+              safeLead: `Your booking request for <strong>${safeResource}</strong> was declined.`,
+            }
+          : {
+              subject: "Your resource booking is confirmed",
+              lead: `Your booking for ${input.resourceName} is confirmed.`,
+              safeLead: `Your booking for <strong>${safeResource}</strong> is confirmed.`,
+            };
+
+  await transporter.sendMail({
+    from,
+    to: input.to,
+    subject: copy.subject,
+    text: [
+      `Hello ${input.name},`,
+      "",
+      copy.lead,
+      "",
+      `Title: ${input.title}`,
+      `When: ${input.whenLabel}`,
+      `Where: ${input.location}`,
+      "",
+      `Check the web application to see this reservation: ${input.appUrl}`,
+    ].join("\n"),
+    html: `
+      <p>Hello ${safeName},</p>
+      <p>${copy.safeLead}</p>
+      <p>
+        <strong>Title:</strong> ${safeTitle}<br />
+        <strong>When:</strong> ${safeWhen}<br />
+        <strong>Where:</strong> ${safeLocation}
+      </p>
+      <p>Check the web application to see this reservation: <a href="${safeAppUrl}">${safeAppUrl}</a></p>
     `,
   });
 }
