@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { isResourceLocation } from "@/lib/resource-locations";
 import { parseResourceImages } from "@/lib/resource-images";
 import { requireAdmin } from "@/lib/require-auth";
 
@@ -67,11 +68,18 @@ export async function PATCH(
       );
     }
 
-    if (!location || location.length > 160) {
-      return NextResponse.json(
-        { message: "Location must be between 1 and 160 characters." },
-        { status: 400 }
-      );
+    if (!isResourceLocation(location)) {
+      const existing = await prisma.resource.findUnique({
+        where: { id },
+        select: { location: true },
+      });
+
+      if (!existing || existing.location !== location) {
+        return NextResponse.json(
+          { message: "Choose Garage A, Garage B, or a floor from 1st to 4th." },
+          { status: 400 }
+        );
+      }
     }
 
     if (

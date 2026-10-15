@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isResourceLocation } from "@/lib/resource-locations";
 import { parseResourceImages } from "@/lib/resource-images";
 import { requireAdmin, requireAuth } from "@/lib/require-auth";
 
@@ -59,7 +60,7 @@ export async function POST(request: Request) {
       !body.location.trim() ||
       body.name.trim().length > 120 ||
       body.type.trim().length > 80 ||
-      body.location.trim().length > 160
+      !isResourceLocation(body.location.trim())
     ) {
       return NextResponse.json(
         { message: "Valid name, type, and location are required." },
