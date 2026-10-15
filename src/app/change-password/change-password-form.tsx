@@ -4,7 +4,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export default function ChangePasswordPage() {
+export default function ChangePasswordPage({
+  required,
+  homeHref,
+}: {
+  required: boolean;
+  homeHref: string;
+}) {
   const router = useRouter();
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -61,7 +67,7 @@ export default function ChangePasswordPage() {
 
       setSuccess("Password changed successfully. Redirecting...");
 
-      router.replace(data.role === "ADMIN" ? "/admin" : "/");
+      router.replace(homeHref);
       router.refresh();
     } catch {
       setError("Unable to connect to the server. Please try again.");
@@ -85,8 +91,9 @@ export default function ChangePasswordPage() {
           </h1>
 
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            For your account security, set a new password before
-            continuing to Ruhunu ResourceHub.
+            {required
+              ? "For your account security, set a new password before continuing to Ruhunu ResourceHub."
+              : "Enter your current password, then choose a new one."}
           </p>
         </div>
 
@@ -192,6 +199,17 @@ export default function ChangePasswordPage() {
           >
             {isLoading ? "Updating Password..." : "Update Password"}
           </button>
+
+          {!required && (
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() => router.push(homeHref)}
+              className="w-full rounded-lg border border-slate-300 px-4 py-3 font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Cancel
+            </button>
+          )}
         </form>
 
         <p className="mt-6 text-center text-xs text-slate-500">

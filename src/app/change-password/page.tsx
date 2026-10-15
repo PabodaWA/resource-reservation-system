@@ -15,6 +15,7 @@ async function ProtectedChangePassword() {
   const user = await prisma.user.findUnique({
     where: { id: sessionUser.id },
     select: {
+      role: true,
       isActive: true,
       mustChangePassword: true,
     },
@@ -24,11 +25,12 @@ async function ProtectedChangePassword() {
     redirect("/login");
   }
 
-  if (!user.mustChangePassword) {
-    redirect("/");
-  }
-
-  return <ChangePasswordForm />;
+  return (
+    <ChangePasswordForm
+      required={user.mustChangePassword}
+      homeHref={user.role === "ADMIN" ? "/admin" : "/"}
+    />
+  );
 }
 
 export default function ChangePasswordPage() {

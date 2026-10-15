@@ -1327,6 +1327,12 @@ export default function AdminDashboardClient({
                   >
                     Profile
                   </button>
+                  <a
+                    href="/change-password"
+                    className="block px-4 py-2.5 text-sm font-medium text-slate-600 hover:bg-[#F5F8FB]"
+                  >
+                    Change password
+                  </a>
                   <button
                     type="button"
                     onClick={() => void handleLogout()}
@@ -1835,14 +1841,22 @@ export default function AdminDashboardClient({
                   You manage users, resources, and reservations for Ruhunu
                   ResourceHub.
                 </p>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <a
+                    href="/change-password"
+                    className="rounded-xl bg-[#3B82F6] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#2563EB]"
+                  >
+                    Change password
+                  </a>
                 <button
                   type="button"
                   onClick={() => void handleLogout()}
                   disabled={loggingOut}
-                  className="mt-6 rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
+                  className="rounded-xl border border-rose-200 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 disabled:opacity-60"
                 >
                   {loggingOut ? "Logging out..." : "Log out"}
                 </button>
+                </div>
               </section>
             )}
           </div>
