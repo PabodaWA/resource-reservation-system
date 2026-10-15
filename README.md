@@ -139,8 +139,11 @@ prisma/schema.prisma          Database models
 prisma/migrations/            SQL migrations
 prisma7.config.ts             Prisma CLI config
 scripts/create-admin.ts       Creates the first administrator
-src/app/page.tsx              Member dashboard
-src/app/admin/page.tsx        Admin dashboard
+src/app/page.tsx              Member dashboard page
+src/app/dashboard-client.tsx  Member screen state
+src/components/member/        Browse, booking, schedule, and reservation views
+src/app/admin/page.tsx        Admin dashboard page
+src/components/admin/         Users, resources, reservations, and reports
 src/app/login/page.tsx        Sign in and password reset
 src/app/api/                  Auth, users, resources, and reservations
 src/lib/                      Booking rules, auth, and mail

@@ -82,7 +82,7 @@ export async function PATCH(
 
       if (!existing || existing.location !== location) {
         return NextResponse.json(
-          { message: "Choose Garage A, Garage B, or a floor from 1st to 4th." },
+          { message: "Choose a location from the list." },
           { status: 400 }
         );
       }

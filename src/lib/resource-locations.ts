@@ -5,6 +5,7 @@ export const RESOURCE_LOCATIONS = [
   "2nd Floor",
   "3rd Floor",
   "4th Floor",
+  "Asset Manager Office",
 ] as const;
 
 export type ResourceLocation = (typeof RESOURCE_LOCATIONS)[number];
