@@ -9,7 +9,18 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
-import { needsAdminApproval } from "@/lib/office-hours";
+import { jobPositionLabel, type JobPosition } from "@/lib/job-position";
+import {
+  RESOURCE_CATALOG,
+  bookingDurationMessage,
+  bookingNeedsApproval,
+  canBookMeetingRoom,
+  categoryLabel,
+  isCompanyVehicle,
+  isMeetingRoom,
+  maxBookingDurationMs,
+  subcategoryLabel,
+} from "@/lib/resource-catalog";
 import {
   ParticipantInputError,
   assertParticipantCapacity,
@@ -23,11 +34,13 @@ export type UserDashboardData = {
     name: string;
     email: string;
     role: "ADMIN" | "MEMBER";
+    jobPosition: JobPosition;
   };
   resources: {
     id: string;
     name: string;
-    type: string;
+    category: string;
+    subcategory: string;
     location: string;
     capacity: number;
     description: string | null;
@@ -46,7 +59,8 @@ export type UserDashboardData = {
     timing: "upcoming" | "in_progress" | "past";
     resourceId: string;
     resourceName: string;
-    resourceType: string;
+    resourceCategory: string;
+    resourceSubcategory: string;
     resourceLocation: string;
     participants: {
       name: string;
@@ -82,15 +96,6 @@ const sections: { id: Section | "favourites"; label: string }[] = [
   { id: "notifications", label: "Notifications" },
   { id: "profile", label: "Profile" },
 ];
-
-const typeLabels: Record<string, string> = {
-  MEETING_ROOM: "Meeting room",
-  CONFERENCE_ROOM: "Conference room",
-  DESK: "Desk",
-  PROJECTOR: "Projector",
-  VEHICLE: "Vehicle",
-  OTHER: "Other",
-};
 
 const inputClass =
   "w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
@@ -133,7 +138,6 @@ const timeChoices = Array.from({ length: 24 * 4 }, (_, index) => {
 });
 
 const MIN_DURATION_MS = 15 * 60 * 1000;
-const MAX_DURATION_MS = 12 * 60 * 60 * 1000;
 const MAX_LEAD_MS = 90 * 24 * 60 * 60 * 1000;
 
 export default function DashboardClient({
@@ -204,10 +208,25 @@ export default function DashboardClient({
       reservation.status === "CONFIRMED" && reservation.timing !== "past"
   ).length;
 
-  const slot = useMemo(
-    () => resolveSlot(booking.date, booking.startClock, booking.endClock),
-    [booking.date, booking.startClock, booking.endClock]
-  );
+  const slot = useMemo(() => {
+    const resource = data.resources.find(
+      (item) => item.id === (booking.resourceId || detailResourceId)
+    );
+
+    return resolveSlot(
+      booking.date,
+      booking.startClock,
+      booking.endClock,
+      maxBookingDurationMs(resource?.category)
+    );
+  }, [
+    booking.date,
+    booking.startClock,
+    booking.endClock,
+    booking.resourceId,
+    detailResourceId,
+    data.resources,
+  ]);
 
   const visibleReservations = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -365,7 +384,7 @@ export default function DashboardClient({
       startClock: "",
       endClock: "",
       title: picked?.name ?? "",
-      category: picked?.type ?? "",
+      category: picked?.category ?? "",
       resourceId,
     });
   }
@@ -404,9 +423,14 @@ export default function DashboardClient({
 
       if (
         next.startClock &&
-        !openStartChoices(next.date, resourceId, data.occupiedSlots).some(
-          (choice) => choice.value === next.startClock
-        )
+        !openStartChoices(
+          next.date,
+          resourceId,
+          data.occupiedSlots,
+          maxBookingDurationMs(
+            data.resources.find((item) => item.id === resourceId)?.category
+          )
+        ).some((choice) => choice.value === next.startClock)
       ) {
         next.startClock = "";
         next.endClock = "";
@@ -419,7 +443,10 @@ export default function DashboardClient({
           next.date,
           next.startClock,
           resourceId,
-          data.occupiedSlots
+          data.occupiedSlots,
+          maxBookingDurationMs(
+            data.resources.find((item) => item.id === resourceId)?.category
+          )
         ).some((choice) => choice.value === next.endClock)
       ) {
         next.endClock = "";
@@ -431,12 +458,13 @@ export default function DashboardClient({
 
   function openBooking(resourceId = "") {
     const nextSlot = defaultSlot();
+    const picked = data.resources.find((resource) => resource.id === resourceId);
     const resolved = resolveSlot(
       nextSlot.date,
       nextSlot.startClock,
-      nextSlot.endClock
+      nextSlot.endClock,
+      maxBookingDurationMs(picked?.category)
     );
-    const picked = data.resources.find((resource) => resource.id === resourceId);
     const free =
       Boolean(resourceId) &&
       resolved.window !== null &&
@@ -451,7 +479,7 @@ export default function DashboardClient({
     setBooking({
       ...emptyBooking,
       ...nextSlot,
-      category: picked?.type ?? "",
+      category: picked?.category ?? "",
       resourceId: free ? resourceId : "",
     });
     setError(
@@ -463,7 +491,14 @@ export default function DashboardClient({
 
   function updateSlot(patch: Partial<Pick<typeof booking, "date" | "startClock" | "endClock">>) {
     const next = { ...booking, ...patch };
-    const resolved = resolveSlot(next.date, next.startClock, next.endClock);
+    const resolved = resolveSlot(
+      next.date,
+      next.startClock,
+      next.endClock,
+      maxBookingDurationMs(
+        data.resources.find((item) => item.id === next.resourceId)?.category
+      )
+    );
     const stillFree =
       Boolean(next.resourceId) &&
       resolved.window !== null &&
@@ -510,10 +545,26 @@ export default function DashboardClient({
       return;
     }
 
+    const bookedResource = data.resources.find(
+      (resource) => resource.id === booking.resourceId
+    );
+
+    if (
+      bookedResource &&
+      isMeetingRoom(bookedResource.category) &&
+      !canBookMeetingRoom(data.user.role, data.user.jobPosition)
+    ) {
+      setError(
+        "Only a manager, team leader, or scrum master can book a meeting room."
+      );
+      return;
+    }
+
     const resolved = resolveSlot(
       booking.date,
       booking.startClock,
-      booking.endClock
+      booking.endClock,
+      maxBookingDurationMs(bookedResource?.category)
     );
 
     if (!resolved.window) {
@@ -534,9 +585,6 @@ export default function DashboardClient({
 
     const start = resolved.window.start;
     const end = resolved.window.end;
-    const bookedResource = data.resources.find(
-      (resource) => resource.id === booking.resourceId
-    );
 
     if (!bookedResource) {
       setError("Choose a resource to book.");
@@ -739,30 +787,24 @@ export default function DashboardClient({
   const upcomingList = [...inProgress, ...upcoming]
     .filter((reservation) => reservation.status === "CONFIRMED")
     .slice(0, 3);
-  const fixedBrowseCategories = [
-    "Meeting Room",
-    "Computer Lab",
-    "Equipment",
-    "Event Space",
-  ];
-  const browseCategories = [
-    "all",
-    ...fixedBrowseCategories,
-    ...[...new Set(data.resources.map((resource) => categoryHint(resource)))]
-      .filter((label) => !fixedBrowseCategories.includes(label))
-      .sort((a, b) => a.localeCompare(b)),
-  ].filter(
-    (category) =>
-      category === "all" ||
-      data.resources.some((resource) => categoryHint(resource) === category)
+  const viewerCanBookMeetingRooms = canBookMeetingRoom(
+    data.user.role,
+    data.user.jobPosition
   );
+  const browseCategories = [
+    { id: "all", label: "All" },
+    ...RESOURCE_CATALOG.map((category) => ({
+      id: category.value,
+      label: category.label,
+    })),
+  ];
   const browseResources = data.resources
     .filter((resource) => {
       if (showFavourites && !favouriteIds.includes(resource.id)) {
         return false;
       }
 
-      if (browseCategory !== "all" && categoryHint(resource) !== browseCategory) {
+      if (browseCategory !== "all" && resource.category !== browseCategory) {
         return false;
       }
 
@@ -1147,7 +1189,8 @@ export default function DashboardClient({
                             >
                               <ResourcePhoto
                                 resource={{
-                                  type: reservation.resourceType,
+                                  category: reservation.resourceCategory,
+                                  subcategory: reservation.resourceSubcategory,
                                   name: reservation.resourceName,
                                   location: reservation.resourceLocation,
                                   images: data.resources.find(
@@ -1353,21 +1396,21 @@ export default function DashboardClient({
                   </p>
                 </div>
 
-                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
+                <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
                   {browseCategories.map((category) => {
-                    const active = browseCategory === category;
+                    const active = browseCategory === category.id;
                     const count =
-                      category === "all"
+                      category.id === "all"
                         ? data.resources.length
                         : data.resources.filter(
-                            (resource) => categoryHint(resource) === category
+                            (resource) => resource.category === category.id
                           ).length;
 
                     return (
                       <button
-                        key={category}
+                        key={category.id}
                         type="button"
-                        onClick={() => setBrowseCategory(category)}
+                        onClick={() => setBrowseCategory(category.id)}
                         className={`flex min-h-[132px] flex-col items-center justify-center rounded-2xl border px-3 py-4 text-center shadow-sm transition ${
                           active
                             ? "border-[#8ec0ff] bg-[#eef6ff] ring-1 ring-[#8ec0ff]"
@@ -1375,13 +1418,13 @@ export default function DashboardClient({
                         }`}
                       >
                         <span className="text-[#3b82f6]">
-                          <CategoryIcon id={category} />
+                          <CategoryIcon id={category.id} />
                         </span>
-                        <span className="mt-3 text-sm font-bold text-slate-800">
-                          {category === "all" ? "All" : category}
+                        <span className="mt-3 text-sm font-bold leading-5 text-slate-800">
+                          {category.label}
                         </span>
                         <span className="mt-1 text-xs text-slate-400">
-                          {category === "all"
+                          {category.id === "all"
                             ? "View all resources"
                             : count === 1
                               ? "1 resource"
@@ -1399,8 +1442,21 @@ export default function DashboardClient({
                         ? "Favourite Resources"
                         : browseCategory === "all"
                           ? "All Resources"
-                          : browseCategory}
+                          : categoryLabel(browseCategory)}
                     </h2>
+                    {browseCategory === "MEETING_ROOMS" &&
+                      !viewerCanBookMeetingRooms && (
+                        <p className="mt-1 text-sm text-amber-700">
+                          Only a manager, team leader, or scrum master can book
+                          a meeting room.
+                        </p>
+                      )}
+                    {browseCategory === "COMPANY_VEHICLES" && (
+                      <p className="mt-1 text-sm text-slate-500">
+                        A trip can last from 15 minutes up to 36 hours. An
+                        administrator must approve it.
+                      </p>
+                    )}
                     <p className="mt-0.5 text-sm text-slate-500">
                       Showing {browseResources.length}{" "}
                       {browseResources.length === 1 ? "resource" : "resources"}
@@ -1482,7 +1538,7 @@ export default function DashboardClient({
                           : ""}
                       </p>
                       <p className="mt-1 text-sm text-slate-500">
-                        {labelType(selectedResource.type)} · Capacity{" "}
+                        {subcategoryLabel(selectedResource.subcategory)} · Capacity{" "}
                         {selectedResource.capacity} · {selectedResource.location}
                       </p>
                     </div>
@@ -1831,7 +1887,9 @@ export default function DashboardClient({
                     </p>
                     <p className="text-sm text-slate-500">{data.user.email}</p>
                     <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-[#2f6fed]">
-                      {data.user.role === "ADMIN" ? "Admin" : "User"}
+                      {data.user.role === "ADMIN"
+                        ? "Admin"
+                        : jobPositionLabel(data.user.jobPosition)}
                     </p>
                   </div>
                 </div>
@@ -1886,6 +1944,10 @@ export default function DashboardClient({
                 onParticipants={setParticipants}
                 onNotify={setNotifyParticipants}
                 onBook={handleBook}
+                allowedToBook={
+                  !isMeetingRoom(detailResource.category) ||
+                  viewerCanBookMeetingRooms
+                }
                 onEdit={
                   viewingReservation
                     ? () => openPendingEdit(viewingReservation)
@@ -1948,6 +2010,7 @@ function ResourceDetailView({
   onParticipants,
   onNotify,
   onBook,
+  allowedToBook,
   onEdit,
   reservation,
 }: {
@@ -1978,6 +2041,7 @@ function ResourceDetailView({
   onParticipants: (next: ParticipantDraft[]) => void;
   onNotify: (next: boolean) => void;
   onBook: (event: FormEvent<HTMLFormElement>) => void;
+  allowedToBook: boolean;
   onEdit?: () => void;
   reservation: Reservation | null;
 }) {
@@ -1991,9 +2055,22 @@ function ResourceDetailView({
   ).length;
   const partyReady =
     resource.capacity <= 1 || filledOthers + 1 >= minimum;
-  const startOptions = openStartChoices(date, resource.id, occupiedSlots);
+  const durationLimit = maxBookingDurationMs(resource.category);
+  const vehicle = isCompanyVehicle(resource.category);
+  const startOptions = openStartChoices(
+    date,
+    resource.id,
+    occupiedSlots,
+    durationLimit
+  );
   const endOptions = startClock
-    ? openEndChoices(date, startClock, resource.id, occupiedSlots)
+    ? openEndChoices(
+        date,
+        startClock,
+        resource.id,
+        occupiedSlots,
+        durationLimit
+      )
     : [];
   const timeTaken = Boolean(
     slot.window && !isResourceFree(resource.id, slot.window, occupiedSlots)
@@ -2001,7 +2078,8 @@ function ResourceDetailView({
   const needsApproval = Boolean(
     slot.window &&
       !timeTaken &&
-      needsAdminApproval(
+      bookingNeedsApproval(
+        resource.category,
         slot.window.start,
         slot.window.end,
         Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -2011,7 +2089,7 @@ function ResourceDetailView({
     ? "That resource is already booked for the selected time."
     : startClock && endClock && slot.error
       ? slot.error
-      : bookingWindowNote(date, startClock, endOptions);
+      : bookingWindowNote(date, startClock, endOptions, durationLimit);
   const selectedDay = date ? combineLocal(date, "12:00") : new Date();
   const [month, setMonth] = useState(() => monthStart(selectedDay));
   const earliest = startOfDay(combineLocal(todayInput, "12:00"));
@@ -2134,7 +2212,10 @@ function ResourceDetailView({
             <h2 className="text-base font-bold text-slate-900">Details</h2>
             <dl className="mt-4 space-y-4 text-sm">
               <DetailRow icon={<PeopleIcon className="h-4 w-4" />} label="Category">
-                {categoryHint(resource)}
+                {categoryLabel(resource.category)}
+              </DetailRow>
+              <DetailRow icon={<BoxIcon />} label="Subcategory">
+                {subcategoryLabel(resource.subcategory)}
               </DetailRow>
               <DetailRow icon={<PeopleIcon className="h-4 w-4" />} label="Capacity">
                 {resource.capacity} {resource.capacity === 1 ? "person" : "people"}
@@ -2154,6 +2235,16 @@ function ResourceDetailView({
 
         {reservation ? (
           <ReservationReadonly reservation={reservation} onEdit={onEdit} />
+        ) : !allowedToBook ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+            <h2 className="text-base font-bold text-slate-900">
+              Meeting rooms are limited
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              Only a manager, team leader, or scrum master can book a meeting
+              room. Ask one of them if you need this room.
+            </p>
+          </section>
         ) : (
         <form
           onSubmit={onBook}
@@ -2287,8 +2378,9 @@ function ResourceDetailView({
                   Select Time
                 </h3>
                 <p className="mt-2 text-xs leading-5 text-slate-500">
-                  A booking lasts at least 15 minutes and at most 12 hours, and
-                  it must finish before the next reservation.
+                  {vehicle
+                    ? "A vehicle trip lasts at least 15 minutes and at most 36 hours, and it must finish before the next reservation. An administrator must approve it."
+                    : "A booking lasts at least 15 minutes and at most 12 hours, and it must finish before the next reservation."}
                 </p>
                 <div className="mt-4 grid grid-cols-2 gap-3">
                   <FormField label="Start time">
@@ -2335,7 +2427,9 @@ function ResourceDetailView({
                 {slot.window && !timeTaken && (
                   <p className="mt-3 text-sm text-slate-500">
                     {formatDuration(slot.window.end.getTime() - slot.window.start.getTime())}
-                    {endClock <= startClock ? " · ends the next day" : ""}
+                    {endsLaterDay(date, startClock, endClock)
+                      ? " · continues past this day"
+                      : ""}
                   </p>
                 )}
                 {timeMessage && (
@@ -2368,9 +2462,7 @@ function ResourceDetailView({
                     label="Time"
                     value={
                       startClock && endClock
-                        ? `${formatClockLabel(startClock)} – ${formatClockLabel(endClock)}${
-                            endClock <= startClock ? " (next day)" : ""
-                          }`
+                        ? `${formatClockLabel(startClock)} – ${formatEndChoice(date, endClock)}`
                         : "Select a time"
                     }
                   />
@@ -2420,8 +2512,9 @@ function ResourceDetailView({
                 </div>
                 {needsApproval && (
                   <p className="mt-4 text-sm leading-6 text-amber-700">
-                    This time is outside office hours (8:00 AM–8:00 PM). It
-                    stays pending until an administrator approves it.
+                    {vehicle
+                      ? "An administrator must approve this vehicle booking before the trip is confirmed."
+                      : "This time is outside office hours (8:00 AM–8:00 PM). It stays pending until an administrator approves it."}
                   </p>
                 )}
                 <button
@@ -2567,7 +2660,7 @@ function GalleryFrame({
   className,
 }: {
   src: string;
-  resource: { type: string; name: string; location: string };
+  resource: { category: string; subcategory: string; name: string; location: string };
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
@@ -2686,7 +2779,8 @@ function formatHourDuration(ms: number) {
 }
 
 function resourceGallery(resource: {
-  type: string;
+  category: string;
+  subcategory: string;
   name: string;
   location: string;
   images?: string[];
@@ -3027,7 +3121,8 @@ function ResourcePhoto({
   className,
 }: {
   resource: {
-    type: string;
+    category: string;
+    subcategory: string;
     name: string;
     location: string;
     images?: string[];
@@ -3058,7 +3153,7 @@ function ResourceVisual({
   resource,
   className,
 }: {
-  resource: { type: string; name: string; location: string };
+  resource: { category: string; subcategory: string; name: string; location: string };
   className?: string;
 }) {
   const kind = visualKind(resource);
@@ -3187,7 +3282,7 @@ function NavIcon({
 function CategoryIcon({ id }: { id: string }) {
   const className = "h-8 w-8";
 
-  if (id === "Meeting Room") {
+  if (id === "MEETING_ROOMS" || id === "all") {
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
         <path d="M6 21V5.5A1.5 1.5 0 0 1 7.5 4h9A1.5 1.5 0 0 1 18 5.5V21" />
@@ -3197,7 +3292,7 @@ function CategoryIcon({ id }: { id: string }) {
     );
   }
 
-  if (id === "Computer Lab") {
+  if (id === "SHARED_WORKSPACES" || id === "SHARED_EQUIPMENT") {
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
         <rect x="3" y="4" width="18" height="12" rx="1.6" />
@@ -3206,12 +3301,13 @@ function CategoryIcon({ id }: { id: string }) {
     );
   }
 
-  if (id === "Equipment") {
+  if (id === "COMPANY_VEHICLES") {
     return (
       <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
-        <rect x="2.5" y="8" width="13" height="8" rx="1.6" />
-        <circle cx="8.5" cy="12" r="2" />
-        <path d="M15.5 10.2h3.2L20.5 12l-1.8 1.8h-3.2" />
+        <path d="M4 15h16l-1.2-4.2A2 2 0 0 0 16.9 9H7.1a2 2 0 0 0-1.9 1.8z" />
+        <path d="M6.5 15v2.2M17.5 15v2.2" />
+        <circle cx="7.5" cy="17.2" r="1.3" />
+        <circle cx="16.5" cy="17.2" r="1.3" />
       </svg>
     );
   }
@@ -3401,9 +3497,8 @@ function ResourceCard({
   onView: () => void;
 }) {
   const equipment =
-    categoryHint(resource) === "Equipment" ||
-    resource.type === "PROJECTOR" ||
-    resource.type === "VEHICLE";
+    resource.category === "SHARED_EQUIPMENT" ||
+    resource.category === "COMPANY_VEHICLES";
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -3423,12 +3518,13 @@ function ResourceCard({
           {resource.name}
         </h3>
         <div className="mt-2 space-y-1.5 text-sm text-slate-500">
-          {equipment ? (
-            <p className="flex items-center gap-2">
-              <BoxIcon />
-              Equipment
-            </p>
-          ) : (
+          <p className="flex items-center gap-2">
+            <BoxIcon />
+            <span className="truncate">
+              {subcategoryLabel(resource.subcategory)}
+            </span>
+          </p>
+          {equipment ? null : (
             <p className="flex items-center gap-2">
               <PeopleIcon className="h-4 w-4 shrink-0" />
               Capacity: {resource.capacity}{" "}
@@ -3722,15 +3818,16 @@ function ReservationRow({
   const schedule = reservationSchedule(reservation.startTime, reservation.endTime);
   const facilities = resource ? resourceFacilities(resource) : "";
   const category = resource
-    ? categoryHint(resource)
-    : labelType(reservation.resourceType);
+    ? categoryLabel(resource.category)
+    : categoryLabel(reservation.resourceCategory);
 
   return (
     <li className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
         <ResourcePhoto
           resource={{
-            type: reservation.resourceType,
+            category: reservation.resourceCategory,
+            subcategory: reservation.resourceSubcategory,
             name: reservation.resourceName,
             location: reservation.resourceLocation,
             images: resource?.images,
@@ -3744,7 +3841,12 @@ function ReservationRow({
           <ul className="mt-2 space-y-1 text-sm text-slate-500">
             <li className="flex items-center gap-2">
               <LayersGlyph className="h-4 w-4 shrink-0 text-slate-400" />
-              <span className="truncate">{category}</span>
+              <span className="truncate">
+                {category} ·{" "}
+                {subcategoryLabel(
+                  resource?.subcategory ?? reservation.resourceSubcategory
+                )}
+              </span>
             </li>
             <li className="flex items-center gap-2">
               <PinIcon />
@@ -3935,9 +4037,13 @@ function PendingEditDialog({
 }) {
   const start = new Date(reservation.startTime);
   const end = new Date(reservation.endTime);
+  const durationLimit = maxBookingDurationMs(resource.category);
+  const vehicle = isCompanyVehicle(resource.category);
   const [date, setDate] = useState(toDateInput(start));
   const [startClock, setStartClock] = useState(toClockInput(start));
-  const [endClock, setEndClock] = useState(toClockInput(end));
+  const [endClock, setEndClock] = useState(
+    vehicle ? `${toDateInput(end)}T${toClockInput(end)}` : toClockInput(end)
+  );
   const [title, setTitle] = useState(reservation.title);
   const [purpose, setPurpose] = useState(reservation.purpose ?? "");
   const [participants, setParticipants] = useState<ParticipantDraft[]>(() =>
@@ -3945,14 +4051,20 @@ function PendingEditDialog({
   );
   const [notify, setNotify] = useState(true);
   const [formError, setFormError] = useState("");
-  const slot = resolveSlot(date, startClock, endClock);
+  const slot = resolveSlot(date, startClock, endClock, durationLimit);
   const startOptions = ensureClockChoice(
-    openStartChoices(date, resource.id, occupiedSlots),
+    openStartChoices(date, resource.id, occupiedSlots, durationLimit),
     startClock
   );
   const endOptions = startClock
     ? ensureClockChoice(
-        openEndChoices(date, startClock, resource.id, occupiedSlots),
+        openEndChoices(
+          date,
+          startClock,
+          resource.id,
+          occupiedSlots,
+          durationLimit
+        ),
         endClock
       )
     : [];
@@ -3962,7 +4074,8 @@ function PendingEditDialog({
   const needsApproval = Boolean(
     slot.window &&
       !timeTaken &&
-      needsAdminApproval(
+      bookingNeedsApproval(
+        resource.category,
         slot.window.start,
         slot.window.end,
         Intl.DateTimeFormat().resolvedOptions().timeZone
@@ -4097,14 +4210,16 @@ function PendingEditDialog({
             </FormField>
           </div>
           <p className="text-sm text-slate-500">
-            Leave the time as it is, or choose another slot. A time outside
-            8:00 AM–8:00 PM stays pending. A time inside office hours is
-            confirmed when you save.
+            {vehicle
+              ? "A vehicle trip can last from 15 minutes to 36 hours. It stays pending until an administrator approves it."
+              : "Leave the time as it is, or choose another slot. A time outside 8:00 AM–8:00 PM stays pending. A time inside office hours is confirmed when you save."}
           </p>
           {slot.window && !timeTaken && (
             <p className="text-sm text-slate-500">
               {formatDuration(slot.window.end.getTime() - slot.window.start.getTime())}
-              {endClock <= startClock ? " · ends the next day" : ""}
+              {endsLaterDay(date, startClock, endClock)
+                ? " · continues past this day"
+                : ""}
             </p>
           )}
           {(formError || slot.error || timeTaken) && (
@@ -4148,12 +4263,12 @@ function PendingEditDialog({
           )}
           {needsApproval && (
             <p className="text-sm leading-6 text-amber-700">
-              This time is outside office hours, so the request stays pending
-              until an administrator approves it. Added people are emailed
-              after it is confirmed.
+              {vehicle
+                ? "This vehicle booking stays pending until an administrator approves it. Added people are emailed after it is confirmed."
+                : "This time is outside office hours, so the request stays pending until an administrator approves it. Added people are emailed after it is confirmed."}
             </p>
           )}
-          {slot.window && !needsApproval && !timeTaken && (
+          {slot.window && !needsApproval && !timeTaken && !vehicle && (
             <p className="text-sm leading-6 text-emerald-700">
               This time is inside office hours. Saving confirms the booking.
             </p>
@@ -4222,7 +4337,7 @@ function ensureClockChoice(
     return options;
   }
 
-  return [{ value, label: formatClockLabel(value) }, ...options];
+  return [{ value, label: formatEndChoice("", value) }, ...options];
 }
 
 function PencilGlyph() {
@@ -4453,15 +4568,31 @@ function initials(name: string) {
   return letters.join("") || "U";
 }
 
-function labelType(type: string) {
-  return (
-    typeLabels[type] ??
-    type
-      .toLowerCase()
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ")
-  );
+function endsLaterDay(date: string, startClock: string, endValue: string) {
+  if (!endValue) {
+    return false;
+  }
+
+  if (endValue.includes("T")) {
+    return !endValue.startsWith(`${date}T`);
+  }
+
+  return Boolean(startClock) && endValue <= startClock;
+}
+
+function formatEndChoice(date: string, endValue: string) {
+  if (!endValue) {
+    return "";
+  }
+
+  if (endValue.includes("T")) {
+    const [endDate, clock] = endValue.split("T");
+    const day =
+      date && endDate !== date ? ` (${formatBookingDate(endDate)})` : "";
+    return `${formatClockLabel(clock)}${day}`;
+  }
+
+  return formatClockLabel(endValue);
 }
 
 function defaultSlot() {
@@ -4478,7 +4609,12 @@ function defaultSlot() {
   };
 }
 
-function resolveSlot(date: string, startClock: string, endClock: string) {
+function resolveSlot(
+  date: string,
+  startClock: string,
+  endClock: string,
+  maxDurationMs = maxBookingDurationMs(undefined)
+) {
   if (!date || !startClock || !endClock) {
     return {
       window: null as { start: Date; end: Date } | null,
@@ -4487,7 +4623,9 @@ function resolveSlot(date: string, startClock: string, endClock: string) {
   }
 
   const start = combineLocal(date, startClock);
-  let end = combineLocal(date, endClock);
+  let end = endClock.includes("T")
+    ? combineLocal(endClock.slice(0, 10), endClock.slice(11))
+    : combineLocal(date, endClock);
 
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
     return {
@@ -4496,16 +4634,25 @@ function resolveSlot(date: string, startClock: string, endClock: string) {
     };
   }
 
-  if (end.getTime() <= start.getTime()) {
+  if (!endClock.includes("T") && end.getTime() <= start.getTime()) {
     end = addDays(end, 1);
+  }
+
+  if (end.getTime() <= start.getTime()) {
+    return {
+      window: null,
+      error: "End time must be after the start time.",
+    };
   }
 
   const duration = end.getTime() - start.getTime();
 
-  if (duration < MIN_DURATION_MS || duration > MAX_DURATION_MS) {
+  if (duration < MIN_DURATION_MS || duration > maxDurationMs) {
     return {
       window: null,
-      error: "A booking must last between 15 minutes and 12 hours.",
+      error: bookingDurationMessage(
+        maxDurationMs > 12 * 60 * 60 * 1000 ? "COMPANY_VEHICLES" : undefined
+      ),
     };
   }
 
@@ -4547,7 +4694,8 @@ function isResourceFree(
 function openStartChoices(
   date: string,
   resourceId: string,
-  slots: UserDashboardData["occupiedSlots"]
+  slots: UserDashboardData["occupiedSlots"],
+  maxDurationMs = maxBookingDurationMs(undefined)
 ) {
   if (!date) {
     return [];
@@ -4557,7 +4705,12 @@ function openStartChoices(
     const probe = new Date(
       combineLocal(date, choice.value).getTime() + MIN_DURATION_MS
     );
-    const resolved = resolveSlot(date, choice.value, toClockInput(probe));
+    const resolved = resolveSlot(
+      date,
+      choice.value,
+      toClockInput(probe),
+      maxDurationMs
+    );
 
     return (
       resolved.window !== null &&
@@ -4570,23 +4723,27 @@ function openEndChoices(
   date: string,
   startClock: string,
   resourceId: string,
-  slots: UserDashboardData["occupiedSlots"]
+  slots: UserDashboardData["occupiedSlots"],
+  maxDurationMs = maxBookingDurationMs(undefined)
 ) {
   if (!date || !startClock) {
     return [];
   }
 
   const start = combineLocal(date, startClock);
+  const longBooking = maxDurationMs > 12 * 60 * 60 * 1000;
   const choices: { value: string; label: string }[] = [];
 
   for (
     let offset = MIN_DURATION_MS;
-    offset <= MAX_DURATION_MS;
+    offset <= maxDurationMs;
     offset += MIN_DURATION_MS
   ) {
     const end = new Date(start.getTime() + offset);
-    const endClock = toClockInput(end);
-    const resolved = resolveSlot(date, startClock, endClock);
+    const endClock = longBooking
+      ? `${toDateInput(end)}T${toClockInput(end)}`
+      : toClockInput(end);
+    const resolved = resolveSlot(date, startClock, endClock, maxDurationMs);
 
     if (!resolved.window || !isResourceFree(resourceId, resolved.window, slots)) {
       if (choices.length > 0) {
@@ -4599,7 +4756,9 @@ function openEndChoices(
     const nextDay = end.toDateString() !== start.toDateString();
     choices.push({
       value: endClock,
-      label: `${formatClockLabel(endClock)}${nextDay ? " (next day)" : ""}`,
+      label: longBooking
+        ? formatEndChoice(date, endClock)
+        : `${formatClockLabel(toClockInput(end))}${nextDay ? " (next day)" : ""}`,
     });
   }
 
@@ -4609,7 +4768,8 @@ function openEndChoices(
 function bookingWindowNote(
   date: string,
   startClock: string,
-  endOptions: { value: string; label: string }[]
+  endOptions: { value: string; label: string }[],
+  maxDurationMs = maxBookingDurationMs(undefined)
 ) {
   if (!date || !startClock) {
     return "";
@@ -4621,11 +4781,11 @@ function bookingWindowNote(
 
   const start = combineLocal(date, startClock);
   const last = endOptions[endOptions.length - 1];
-  const resolved = resolveSlot(date, startClock, last.value);
+  const resolved = resolveSlot(date, startClock, last.value, maxDurationMs);
 
   if (
     resolved.window &&
-    resolved.window.end.getTime() < start.getTime() + MAX_DURATION_MS
+    resolved.window.end.getTime() < start.getTime() + maxDurationMs
   ) {
     return `You can book until ${last.label}. This resource is already reserved after that.`;
   }
@@ -4746,7 +4906,8 @@ function savedResourcePhotos(resource: { images?: string[] }) {
 }
 
 function resourcePhoto(resource: {
-  type: string;
+  category: string;
+  subcategory: string;
   name: string;
   location: string;
   images?: string[];
@@ -4757,7 +4918,7 @@ function resourcePhoto(resource: {
     return saved[0];
   }
 
-  const blob = `${resource.type} ${resource.name}`.toLowerCase();
+  const blob = `${resource.subcategory} ${resource.name}`.toLowerCase();
 
   if (blob.includes("whiteboard") || blob.includes("board")) {
     return "https://images.unsplash.com/photo-1587825140708-dfaf72ae4b04?auto=format&fit=crop&w=900&q=70";
@@ -4776,25 +4937,34 @@ function resourcePhoto(resource: {
   return photos[index];
 }
 
-function visualKind(resource: { type: string; name: string; location: string }) {
-  const blob = `${resource.type} ${resource.name} ${resource.location}`.toLowerCase();
-
-  if (blob.includes("projector")) {
-    return { id: "projector" as const, gradient: "from-slate-200 to-slate-400" };
-  }
-
-  if (blob.includes("laptop") || blob.includes("computer") || resource.type === "DESK") {
+function visualKind(resource: {
+  category: string;
+  subcategory: string;
+  name: string;
+  location: string;
+}) {
+  if (
+    resource.category === "SHARED_EQUIPMENT" &&
+    (resource.subcategory === "LAPTOP" ||
+      resource.subcategory === "PORTABLE_MONITOR")
+  ) {
     return { id: "laptop" as const, gradient: "from-zinc-200 to-slate-500" };
   }
 
-  if (blob.includes("lab")) {
+  if (resource.category === "SHARED_EQUIPMENT") {
+    return { id: "projector" as const, gradient: "from-slate-200 to-slate-400" };
+  }
+
+  if (resource.category === "SHARED_WORKSPACES") {
     return { id: "lab" as const, gradient: "from-indigo-200 to-blue-500" };
   }
 
   if (
-    blob.includes("hall") ||
-    blob.includes("conference") ||
-    resource.type === "CONFERENCE_ROOM"
+    resource.subcategory === "LARGE_BOARDROOM" ||
+    resource.subcategory === "VIDEO_CONFERENCE_ROOM" ||
+    resource.subcategory === "EVENT_SPACE" ||
+    resource.subcategory === "TRAINING_ROOM" ||
+    resource.category === "COMPANY_VEHICLES"
   ) {
     return { id: "hall" as const, gradient: "from-amber-100 to-orange-300" };
   }
@@ -4802,42 +4972,18 @@ function visualKind(resource: { type: string; name: string; location: string }) 
   return { id: "room" as const, gradient: "from-sky-200 to-blue-400" };
 }
 
-function categoryHint(resource: { type: string; name: string; location: string }) {
-  const blob = `${resource.type} ${resource.name} ${resource.location}`.toLowerCase();
-
-  if (blob.includes("lab")) {
-    return "Computer Lab";
-  }
-
-  if (resource.type === "PROJECTOR" || blob.includes("projector")) {
-    return "Equipment";
-  }
-
-  if (
-    resource.type === "CONFERENCE_ROOM" ||
-    blob.includes("hall") ||
-    blob.includes("conference")
-  ) {
-    return "Event Space";
-  }
-
-  if (resource.type === "MEETING_ROOM") {
-    return "Meeting Room";
-  }
-
-  if (resource.type === "DESK") {
-    return "Workspace";
-  }
-
-  if (resource.type === "VEHICLE") {
-    return "Vehicle";
-  }
-
-  return labelType(resource.type);
+function categoryHint(resource: { category: string }) {
+  return categoryLabel(resource.category);
 }
 
 function matchesResource(
-  resource: { name: string; type: string; location: string; description: string | null },
+  resource: {
+    name: string;
+    category: string;
+    subcategory: string;
+    location: string;
+    description: string | null;
+  },
   query: string
 ) {
   const term = query.trim().toLowerCase();
@@ -4848,8 +4994,8 @@ function matchesResource(
 
   return (
     resource.name.toLowerCase().includes(term) ||
-    labelType(resource.type).toLowerCase().includes(term) ||
-    categoryHint(resource).toLowerCase().includes(term) ||
+    subcategoryLabel(resource.subcategory).toLowerCase().includes(term) ||
+    categoryLabel(resource.category).toLowerCase().includes(term) ||
     resource.location.toLowerCase().includes(term) ||
     (resource.description ?? "").toLowerCase().includes(term)
   );

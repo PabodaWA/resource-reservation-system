@@ -74,7 +74,8 @@ async function ProtectedAdmin() {
       select: {
         id: true,
         name: true,
-        type: true,
+        category: true,
+        subcategory: true,
         location: true,
         capacity: true,
         description: true,
@@ -105,7 +106,8 @@ async function ProtectedAdmin() {
         resource: {
           select: {
             name: true,
-            type: true,
+            category: true,
+            subcategory: true,
             location: true,
           },
         },
@@ -139,7 +141,8 @@ async function ProtectedAdmin() {
     resources: resources.map((item) => ({
       id: item.id,
       name: item.name,
-      type: item.type,
+      category: item.category,
+      subcategory: item.subcategory,
       location: item.location,
       capacity: item.capacity,
       description: item.description,
@@ -162,7 +165,8 @@ async function ProtectedAdmin() {
       userName: item.user.name,
       userEmail: item.user.email,
       resourceName: item.resource.name,
-      resourceType: item.resource.type,
+      resourceCategory: item.resource.category,
+      resourceSubcategory: item.resource.subcategory,
       resourceLocation: item.resource.location,
       participants: item.participants,
     })),

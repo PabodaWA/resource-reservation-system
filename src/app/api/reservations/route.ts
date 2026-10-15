@@ -3,7 +3,16 @@ import { Prisma } from "@/generated/prisma/client";
 import { isMailConfigured, sendParticipantNotice } from "@/lib/mail";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/require-auth";
-import { needsAdminApproval } from "@/lib/office-hours";
+import {
+  MIN_BOOKING_MS,
+  VEHICLE_MAX_BOOKING_MS,
+  bookingDurationMessage,
+  bookingNeedsApproval,
+  canBookMeetingRoom,
+  isCompanyVehicle,
+  isMeetingRoom,
+  maxBookingDurationMs,
+} from "@/lib/resource-catalog";
 import {
   ParticipantInputError,
   assertParticipantCapacity,
@@ -12,8 +21,6 @@ import {
   parseParticipants,
 } from "@/lib/reservation-participants";
 
-const MIN_DURATION_MS = 15 * 60 * 1000;
-const MAX_DURATION_MS = 12 * 60 * 60 * 1000;
 const MAX_LEAD_MS = 90 * 24 * 60 * 60 * 1000;
 const START_GRACE_MS = 60 * 1000;
 
@@ -127,9 +134,16 @@ export async function POST(request: Request) {
 
     const duration = end.getTime() - start.getTime();
 
-    if (duration < MIN_DURATION_MS || duration > MAX_DURATION_MS) {
+    if (duration < MIN_BOOKING_MS) {
       return NextResponse.json(
-        { message: "A booking must last between 15 minutes and 12 hours." },
+        { message: "A booking must last at least 15 minutes." },
+        { status: 400 }
+      );
+    }
+
+    if (duration > VEHICLE_MAX_BOOKING_MS) {
+      return NextResponse.json(
+        { message: "A booking cannot be longer than 36 hours." },
         { status: 400 }
       );
     }
@@ -180,6 +194,7 @@ export async function POST(request: Request) {
           where: { id: resourceId },
           select: {
             id: true,
+            category: true,
             capacity: true,
             status: true,
           },
@@ -192,15 +207,39 @@ export async function POST(request: Request) {
           );
         }
 
+        if (duration > maxBookingDurationMs(resource.category)) {
+          throw new ReservationRequestError(
+            bookingDurationMessage(resource.category),
+            400
+          );
+        }
+
         const bookedUser = await tx.user.findUnique({
           where: { id: bookForUserId },
-          select: { id: true, name: true, email: true, isActive: true },
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            jobPosition: true,
+            isActive: true,
+          },
         });
 
         if (!bookedUser || !bookedUser.isActive) {
           throw new ReservationRequestError(
             "That person cannot receive a booking.",
             404
+          );
+        }
+
+        if (
+          isMeetingRoom(resource.category) &&
+          !canBookMeetingRoom(bookedUser.role, bookedUser.jobPosition)
+        ) {
+          throw new ReservationRequestError(
+            "Only a manager, team leader, or scrum master can book a meeting room.",
+            403
           );
         }
 
@@ -244,7 +283,12 @@ export async function POST(request: Request) {
                 : null,
             startTime: start,
             endTime: end,
-            status: needsAdminApproval(start, end, timeZone)
+            status: bookingNeedsApproval(
+              resource.category,
+              start,
+              end,
+              timeZone
+            )
               ? "PENDING"
               : "CONFIRMED",
             userId: bookedUser.id,
@@ -260,7 +304,7 @@ export async function POST(request: Request) {
             startTime: true,
             endTime: true,
             user: { select: { name: true } },
-            resource: { select: { name: true, location: true } },
+            resource: { select: { name: true, location: true, category: true } },
             participants: { select: { name: true, email: true } },
           },
         });
@@ -269,6 +313,7 @@ export async function POST(request: Request) {
     );
 
     const awaitingApproval = reservation.status === "PENDING";
+    const vehicleRequest = isCompanyVehicle(reservation.resource.category);
     let notified = 0;
     let notifyFailed = false;
 
@@ -306,9 +351,11 @@ export async function POST(request: Request) {
     }
 
     const others = reservation.participants.length;
-    let message = awaitingApproval
-      ? "This time is outside office hours (8:00 AM–8:00 PM), so the booking is waiting for an administrator to approve it."
-      : "Reservation booked.";
+    let message = vehicleRequest
+      ? "This vehicle booking is waiting for an administrator to approve it."
+      : awaitingApproval
+        ? "This time is outside office hours (8:00 AM–8:00 PM), so the booking is waiting for an administrator to approve it."
+        : "Reservation booked.";
 
     if (!awaitingApproval && others > 0) {
       message =

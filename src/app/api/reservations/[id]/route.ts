@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { isMailConfigured, sendParticipantNotice } from "@/lib/mail";
-import { needsAdminApproval } from "@/lib/office-hours";
+import {
+  MIN_BOOKING_MS,
+  VEHICLE_MAX_BOOKING_MS,
+  bookingDurationMessage,
+  bookingNeedsApproval,
+  canBookMeetingRoom,
+  isMeetingRoom,
+  maxBookingDurationMs,
+} from "@/lib/resource-catalog";
 import { prisma } from "@/lib/prisma";
 import { requireAuth } from "@/lib/require-auth";
 import {
@@ -12,8 +20,6 @@ import {
   parseParticipants,
 } from "@/lib/reservation-participants";
 
-const MIN_DURATION_MS = 15 * 60 * 1000;
-const MAX_DURATION_MS = 12 * 60 * 60 * 1000;
 const MAX_LEAD_MS = 90 * 24 * 60 * 60 * 1000;
 const START_GRACE_MS = 60 * 1000;
 
@@ -282,9 +288,16 @@ async function updatePendingReservation(
 
   const duration = end.getTime() - start.getTime();
 
-  if (duration < MIN_DURATION_MS || duration > MAX_DURATION_MS) {
+  if (duration < MIN_BOOKING_MS) {
     return NextResponse.json(
-      { message: "A booking must last between 15 minutes and 12 hours." },
+      { message: "A booking must last at least 15 minutes." },
+      { status: 400 }
+    );
+  }
+
+  if (duration > VEHICLE_MAX_BOOKING_MS) {
+    return NextResponse.json(
+      { message: "A booking cannot be longer than 36 hours." },
       { status: 400 }
     );
   }
@@ -344,6 +357,7 @@ async function updatePendingReservation(
             user: { select: { email: true } },
             resource: {
               select: {
+                category: true,
                 capacity: true,
                 status: true,
               },
@@ -373,6 +387,28 @@ async function updatePendingReservation(
           throw new ReservationEditError(
             "That resource is not available to book.",
             404
+          );
+        }
+
+        if (duration > maxBookingDurationMs(current.resource.category)) {
+          throw new ReservationEditError(
+            bookingDurationMessage(current.resource.category),
+            400
+          );
+        }
+
+        const editor = await tx.user.findUnique({
+          where: { id: userId },
+          select: { role: true, jobPosition: true },
+        });
+
+        if (
+          isMeetingRoom(current.resource.category) &&
+          (!editor || !canBookMeetingRoom(editor.role, editor.jobPosition))
+        ) {
+          throw new ReservationEditError(
+            "Only a manager, team leader, or scrum master can book a meeting room.",
+            403
           );
         }
 
@@ -415,7 +451,12 @@ async function updatePendingReservation(
             purpose,
             startTime: start,
             endTime: end,
-            status: needsAdminApproval(start, end, timeZone)
+            status: bookingNeedsApproval(
+              current.resource.category,
+              start,
+              end,
+              timeZone
+            )
               ? "PENDING"
               : "CONFIRMED",
             participants: {

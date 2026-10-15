@@ -54,17 +54,20 @@ model User {
 
 
 model Resource {
-  id           String        @id @default(cuid())
+  id           String         @id @default(cuid())
   name         String
-  type         String
+  category     String
+  subcategory  String
   location     String
   capacity     Int           @default(1)
   description  String?
   images       String[]       @default([])
   status       ResourceStatus @default(ACTIVE)
   reservations Reservation[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([category])
 }
 
 model Reservation {

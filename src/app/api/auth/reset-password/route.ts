@@ -76,6 +76,7 @@ export async function POST(request: Request) {
       where: {
         id: result.userId,
         isActive: true,
+        mustChangePassword: false,
         passwordResetOtpHash: result.otpHash,
         passwordResetOtpExpiry: { gt: new Date() },
       },

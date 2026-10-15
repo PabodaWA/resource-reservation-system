@@ -8,6 +8,14 @@ import {
   jobPositionLabel,
   type JobPosition,
 } from "@/lib/job-position";
+import {
+  RESOURCE_CATALOG,
+  categoryLabel,
+  parseResourceClassification,
+  subcategoryBelongsToCategory,
+  subcategoryLabel,
+  subcategoriesFor,
+} from "@/lib/resource-catalog";
 import { MAX_RESOURCE_IMAGES } from "@/lib/resource-images";
 import {
   isResourceLocation,
@@ -33,7 +41,8 @@ export type AdminDashboardData = {
   resources: {
     id: string;
     name: string;
-    type: string;
+    category: string;
+    subcategory: string;
     location: string;
     capacity: number;
     description: string | null;
@@ -56,7 +65,8 @@ export type AdminDashboardData = {
     userName: string;
     userEmail: string;
     resourceName: string;
-    resourceType: string;
+    resourceCategory: string;
+    resourceSubcategory: string;
     resourceLocation: string;
     participants: {
       name: string;
@@ -140,19 +150,6 @@ const sectionCopy: Record<Section, { title: string; detail: string }> = {
   },
 };
 
-const resourceTypes = [
-  { value: "MEETING_ROOM", label: "Meeting room" },
-  { value: "CONFERENCE_ROOM", label: "Conference room" },
-  { value: "DESK", label: "Desk" },
-  { value: "PROJECTOR", label: "Projector" },
-  { value: "VEHICLE", label: "Vehicle" },
-  { value: "OTHER", label: "Other" },
-];
-
-const typeLabels = Object.fromEntries(
-  resourceTypes.map((type) => [type.value, type.label])
-);
-
 const sliceColors = [
   "#5B9DFF",
   "#7DD3FC",
@@ -191,7 +188,8 @@ function emailAlreadyUsed(
 
 const emptyResource = {
   name: "",
-  type: "",
+  category: "",
+  subcategory: "",
   location: "",
   capacity: "1",
   description: "",
@@ -310,7 +308,7 @@ export default function AdminDashboardClient({
   ).slice(0, 4);
 
   const categoryCount = new Set(
-    data.resources.map((resource) => usageCategory(resource.type))
+    data.resources.map((resource) => categoryLabel(resource.category))
   ).size;
 
   const userTrend = percentChange(
@@ -399,7 +397,7 @@ export default function AdminDashboardClient({
   const managedResources = useMemo(() => {
     const term = resourceSearch.trim().toLowerCase();
     const filtered = data.resources.filter((resource) => {
-      const category = usageCategory(resource.type);
+      const category = categoryLabel(resource.category);
 
       if (resourceCategory !== "all" && category !== resourceCategory) {
         return false;
@@ -423,7 +421,7 @@ export default function AdminDashboardClient({
       return (
         resource.name.toLowerCase().includes(term) ||
         category.toLowerCase().includes(term) ||
-        labelType(resource.type).toLowerCase().includes(term) ||
+        subcategoryLabel(resource.subcategory).toLowerCase().includes(term) ||
         resource.location.toLowerCase().includes(term)
       );
     });
@@ -540,14 +538,14 @@ export default function AdminDashboardClient({
     for (const resource of data.resources) {
       if (
         resource.name.toLowerCase().includes(term) ||
-        labelType(resource.type).toLowerCase().includes(term) ||
+        subcategoryLabel(resource.subcategory).toLowerCase().includes(term) ||
         resource.location.toLowerCase().includes(term)
       ) {
         hits.push({
           id: `resource-${resource.id}`,
           kind: "Resource",
           title: resource.name,
-          detail: `${labelType(resource.type)} · ${resource.location}`,
+          detail: `${categoryLabel(resource.category)} · ${subcategoryLabel(resource.subcategory)} · ${resource.location}`,
         });
       }
     }
@@ -574,7 +572,7 @@ export default function AdminDashboardClient({
     .map((resource) => ({
       id: resource.id,
       name: resource.name,
-      type: labelType(resource.type),
+      type: categoryLabel(resource.category),
       bookings: data.reservations.filter(
         (reservation) =>
           reservation.resourceId === resource.id &&
@@ -906,8 +904,13 @@ export default function AdminDashboardClient({
     const description = resourceForm.description.trim();
     const capacity = Number(resourceForm.capacity);
 
-    if (!resourceTypes.some((type) => type.value === resourceForm.type)) {
-      setError("Choose a category.");
+    if (
+      !subcategoryBelongsToCategory(
+        resourceForm.category,
+        resourceForm.subcategory
+      )
+    ) {
+      setError("Choose a category and a matching subcategory.");
       return;
     }
 
@@ -944,7 +947,8 @@ export default function AdminDashboardClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          type: resourceForm.type,
+          category: resourceForm.category,
+          subcategory: resourceForm.subcategory,
           location,
           capacity,
           description: description || null,
@@ -973,7 +977,8 @@ export default function AdminDashboardClient({
   function fillResourceForm(resource: AdminDashboardData["resources"][number]) {
     setResourceForm({
       name: resource.name,
-      type: resource.type,
+      category: resource.category,
+      subcategory: resource.subcategory,
       location: resource.location,
       capacity: String(resource.capacity),
       description: resource.description ?? "",
@@ -1027,10 +1032,12 @@ export default function AdminDashboardClient({
     );
 
     if (
-      !resourceTypes.some((type) => type.value === resourceForm.type) &&
-      resourceForm.type !== currentResource?.type
+      !parseResourceClassification(
+        resourceForm.category,
+        resourceForm.subcategory
+      ).ok
     ) {
-      setError("Choose a category.");
+      setError("Choose a category and a matching subcategory.");
       return;
     }
 
@@ -1069,7 +1076,8 @@ export default function AdminDashboardClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
-          type: resourceForm.type,
+          category: resourceForm.category,
+          subcategory: resourceForm.subcategory,
           location,
           capacity,
           description: description || null,
@@ -2522,7 +2530,7 @@ function ResourcesPanel({
   const categoryCounts = new Map<string, number>();
 
   for (const resource of resources) {
-    const label = usageCategory(resource.type);
+    const label = categoryLabel(resource.category);
     categoryCounts.set(label, (categoryCounts.get(label) ?? 0) + 1);
   }
 
@@ -2667,6 +2675,7 @@ function ResourcesPanel({
                 <th className="px-4 py-3 font-medium">#</th>
                 <th className="px-2 py-3 font-medium">Resource Name</th>
                 <th className="px-2 py-3 font-medium">Category</th>
+                <th className="px-2 py-3 font-medium">Subcategory</th>
                 <th className="px-2 py-3 font-medium">Location</th>
                 <th className="px-2 py-3 font-medium">Capacity</th>
                 <th className="px-2 py-3 font-medium">Status</th>
@@ -2676,13 +2685,13 @@ function ResourcesPanel({
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-slate-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-slate-400">
                     No resources match these filters.
                   </td>
                 </tr>
               ) : (
                 rows.map((resource, index) => {
-                  const categoryLabel = usageCategory(resource.type);
+                  const group = categoryLabel(resource.category);
 
                   return (
                     <tr key={resource.id} className="border-b border-[#F8FAFC]">
@@ -2692,9 +2701,9 @@ function ResourcesPanel({
                       <td className="px-2 py-3">
                         <span className="flex items-center gap-3">
                           <span
-                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${categoryStyle(categoryLabel)}`}
+                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${categoryStyle(group)}`}
                           >
-                            <CategoryGlyph category={categoryLabel} />
+                            <CategoryGlyph category={group} />
                           </span>
                           <span className="font-semibold text-slate-700">
                             {resource.name}
@@ -2703,10 +2712,13 @@ function ResourcesPanel({
                       </td>
                       <td className="px-2 py-3">
                         <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${categoryStyle(categoryLabel)}`}
+                          className={`rounded-full px-2.5 py-1 text-xs font-semibold ${categoryStyle(group)}`}
                         >
-                          {categoryLabel}
+                          {group}
                         </span>
+                      </td>
+                      <td className="px-2 py-3 text-slate-600">
+                        {subcategoryLabel(resource.subcategory)}
                       </td>
                       <td className="px-2 py-3 text-slate-500">
                         {resource.location}
@@ -2882,13 +2894,7 @@ function ResourceDialog({
   onCreate: (event: FormEvent<HTMLFormElement>) => void;
   onUpdate: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const typeChoices =
-    !form.type || resourceTypes.some((type) => type.value === form.type)
-      ? resourceTypes
-      : [
-          ...resourceTypes,
-          { value: form.type, label: labelType(form.type) },
-        ];
+  const subcategoryChoices = subcategoriesFor(form.category);
   const locationChoices = (
     RESOURCE_LOCATIONS as readonly string[]
   ).includes(form.location)
@@ -2938,7 +2944,7 @@ function ResourceDialog({
   }
 
   if (mode === "view" && resource) {
-    const category = usageCategory(resource.type);
+    const category = categoryLabel(resource.category);
 
     return (
       <div
@@ -2960,7 +2966,9 @@ function ResourceDialog({
               <h2 className="text-lg font-bold text-slate-800">
                 {resource.name}
               </h2>
-              <p className="text-sm text-slate-400">{category}</p>
+              <p className="text-sm text-slate-400">
+                {category} · {subcategoryLabel(resource.subcategory)}
+              </p>
             </div>
           </div>
           <dl className="mt-5 space-y-3 text-sm">
@@ -3053,22 +3061,64 @@ function ResourceDialog({
           Category
           <select
             required
-            value={form.type}
-            onChange={(event) =>
-              onChange({ ...form, type: event.target.value })
-            }
+            value={form.category}
+            onChange={(event) => {
+              const category = event.target.value;
+              const stillValid = subcategoriesFor(category).some(
+                (item) => item.value === form.subcategory
+              );
+
+              onChange({
+                ...form,
+                category,
+                subcategory: stillValid ? form.subcategory : "",
+              });
+            }}
             className={`${inputClass} mt-2`}
           >
             <option value="" disabled>
               Select a category
             </option>
-            {typeChoices.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
+            {RESOURCE_CATALOG.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
               </option>
             ))}
           </select>
         </label>
+
+        <label className="mt-4 block text-sm font-medium text-slate-700">
+          Subcategory
+          <select
+            required
+            value={form.subcategory}
+            disabled={!form.category}
+            onChange={(event) =>
+              onChange({ ...form, subcategory: event.target.value })
+            }
+            className={`${inputClass} mt-2 disabled:bg-slate-50`}
+          >
+            <option value="" disabled>
+              {form.category ? "Select a subcategory" : "Choose a category first"}
+            </option>
+            {subcategoryChoices.map((item) => (
+              <option key={item.value} value={item.value}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {form.category === "MEETING_ROOMS" && (
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Only a manager, team leader, or scrum master can book a meeting room.
+          </p>
+        )}
+        {form.category === "COMPANY_VEHICLES" && (
+          <p className="mt-2 text-xs leading-5 text-slate-500">
+            Vehicle trips can last from 15 minutes to 36 hours, and an
+            administrator must approve each booking.
+          </p>
+        )}
 
         <label className="mt-4 block text-sm font-medium text-slate-700">
           Name
@@ -3242,35 +3292,38 @@ function ResourceDialog({
 }
 
 function categoryStyle(category: string) {
-  if (category === "Meeting Rooms") {
+  if (category === "Meeting rooms") {
     return "bg-[#E8F2FF] text-[#3B82F6]";
   }
 
-  if (category === "Computer Labs") {
-    return "bg-[#F3E8FF] text-[#7C3AED]";
-  }
-
-  if (category === "Equipment") {
+  if (category === "Shared equipment") {
     return "bg-[#FFF4E5] text-[#D97706]";
   }
 
-  if (category === "Event Spaces") {
-    return "bg-[#FCE7F3] text-[#DB2777]";
+  if (category === "Shared desks and workspaces") {
+    return "bg-[#E0F7FA] text-[#0E7490]";
   }
 
-  if (category === "Desks") {
-    return "bg-[#E0F7FA] text-[#0E7490]";
+  if (category === "Company vehicles") {
+    return "bg-[#E8F8EF] text-[#15803D]";
+  }
+
+  if (category === "Other shared facilities") {
+    return "bg-[#F3E8FF] text-[#7C3AED]";
   }
 
   return "bg-slate-100 text-slate-600";
 }
 
 function CategoryGlyph({ category }: { category: string }) {
-  if (category === "Meeting Rooms" || category === "Event Spaces") {
+  if (category === "Meeting rooms" || category === "Other shared facilities") {
     return <BuildingIcon />;
   }
 
-  if (category === "Computer Labs" || category === "Desks") {
+  if (
+    category === "Shared desks and workspaces" ||
+    category === "Shared equipment"
+  ) {
     return <MonitorIcon />;
   }
 
@@ -3591,7 +3644,7 @@ function ReservationsPanel({
                     reservation.createdAt,
                     reservation.createdAt
                   );
-                  const category = usageCategory(reservation.resourceType);
+                  const category = categoryLabel(reservation.resourceCategory);
                   const canChange = reservation.timing !== "past";
 
                   return (
@@ -4614,7 +4667,7 @@ function buildUsage(resources: AdminDashboardData["resources"]) {
   const counts = new Map<string, number>();
 
   for (const resource of resources) {
-    const label = usageCategory(resource.type);
+    const label = categoryLabel(resource.category);
     counts.set(label, (counts.get(label) ?? 0) + 1);
   }
 
@@ -4691,32 +4744,6 @@ function activityIconColor(kind: ActivityKind) {
   if (kind === "resource") return "text-amber-500";
   if (kind === "user") return "text-[#5B9DFF]";
   return "text-rose-500";
-}
-
-function usageCategory(type: string) {
-  if (type === "MEETING_ROOM" || type === "CONFERENCE_ROOM") {
-    return "Meeting Rooms";
-  }
-
-  if (type === "PROJECTOR" || type === "VEHICLE") {
-    return "Equipment";
-  }
-
-  if (type === "DESK") {
-    return "Desks";
-  }
-
-  const normalized = type.toLowerCase();
-
-  if (normalized.includes("lab")) {
-    return "Computer Labs";
-  }
-
-  if (normalized.includes("event")) {
-    return "Event Spaces";
-  }
-
-  return labelType(type);
 }
 
 function percentChange(current: number, previous: number) {
@@ -4805,17 +4832,6 @@ function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const letters = parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase());
   return letters.join("") || "A";
-}
-
-function labelType(type: string) {
-  return (
-    typeLabels[type] ??
-    type
-      .toLowerCase()
-      .split("_")
-      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(" ")
-  );
 }
 
 function formatDay(date: Date) {
