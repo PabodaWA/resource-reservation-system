@@ -1216,6 +1216,14 @@ export default function AdminDashboardClient({
             Stronger Together
           </p>
           <span className="mx-auto mt-2 block h-1 w-10 rounded-full bg-[#5B9DFF]" />
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            disabled={loggingOut}
+            className="mx-auto mt-3 flex items-center justify-center rounded-lg border border-red-200 px-2.5 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+          >
+            {loggingOut ? "Logging out..." : "Log out"}
+          </button>
         </div>
       </aside>
 
