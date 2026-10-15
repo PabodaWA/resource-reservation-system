@@ -132,6 +132,8 @@ Forgot password on the login page emails a one-time code when SMTP is configured
 
 One user has many reservations. One resource has many reservations. One reservation has many participants.
 
+The ER diagram is available in [docs/er-diagram.md](docs/er-diagram.md). The short walkthrough in [docs/demo-script.md](docs/demo-script.md) can be used to record the required 3-5 minute demonstration.
+
 ## Project layout
 
 ```text

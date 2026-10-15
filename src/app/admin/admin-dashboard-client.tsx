@@ -1,7 +1,8 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useLocalStorageValue, setLocalStorageValue } from "@/lib/use-local-storage-value";
 import ThemeToggle from "@/components/theme-toggle";
 import { MEMBER_JOB_POSITIONS, isJobPosition, jobPositionLabel } from "@/lib/job-position";
 import { categoryLabel, parseResourceClassification, subcategoryBelongsToCategory, subcategoryLabel } from "@/lib/resource-catalog";
@@ -79,7 +80,9 @@ export default function AdminDashboardClient({
     null
   );
   const [loggingOut, setLoggingOut] = useState(false);
-  const [clearedNoticeAt, setClearedNoticeAt] = useState(0);
+  const clearedNoticeAt = Number(
+    useLocalStorageValue(`resourcehub-notices:${data.admin.id}:cleared`, "0")
+  ) || 0;
   const [reviewingId, setReviewingId] = useState("");
   const [deletingReservationId, setDeletingReservationId] = useState("");
   const [error, setError] = useState("");
@@ -109,16 +112,10 @@ export default function AdminDashboardClient({
     [activity, clearedNoticeAt]
   );
   const recentActivity = notifications.slice(0, 4);
-  const notificationCount = notifications.filter((item) => {
-    return Date.now() - new Date(item.at).getTime() < 7 * 24 * 60 * 60 * 1000;
-  }).length;
-
-  useEffect(() => {
-    const cleared = Number(localStorage.getItem(`${noticeKey}:cleared`) || 0);
-    if (Number.isFinite(cleared)) {
-      setClearedNoticeAt(cleared);
-    }
-  }, [noticeKey]);
+  const currentTime = new Date().getTime();
+  const notificationCount = notifications.filter(
+    (item) => currentTime - new Date(item.at).getTime() < 7 * 24 * 60 * 60 * 1000
+  ).length;
 
   const weekBookings = data.reservations.filter(
     (reservation) =>
@@ -138,8 +135,8 @@ export default function AdminDashboardClient({
         )
       : [...data.reservations].sort(
           (a, b) =>
-            Math.abs(new Date(a.startTime).getTime() - Date.now()) -
-            Math.abs(new Date(b.startTime).getTime() - Date.now())
+            Math.abs(new Date(a.startTime).getTime() - currentTime) -
+            Math.abs(new Date(b.startTime).getTime() - currentTime)
         )
   ).slice(0, 4);
 
@@ -289,7 +286,7 @@ export default function AdminDashboardClient({
     resourceSort,
   ]);
 
-  const managedReservations = useMemo(() => {
+  const managedReservations = (() => {
     const term = reservationSearch.trim().toLowerCase();
     const filtered = data.reservations.filter((reservation) => {
       if (reservationFilter !== "all" && reservation.status !== reservationFilter) {
@@ -338,16 +335,7 @@ export default function AdminDashboardClient({
 
       return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
-  }, [
-    data.reservations,
-    reservationFilter,
-    reservationSearch,
-    reservationResourceId,
-    reservationDateScope,
-    reservationSort,
-    weekStart,
-    weekEnd,
-  ]);
+  })();
 
   const searchHits = useMemo(() => {
     const term = query.trim().toLowerCase();
@@ -431,8 +419,7 @@ export default function AdminDashboardClient({
 
   function clearNotifications() {
     const clearedAt = Date.now();
-    setClearedNoticeAt(clearedAt);
-    localStorage.setItem(`${noticeKey}:cleared`, String(clearedAt));
+    setLocalStorageValue(`${noticeKey}:cleared`, String(clearedAt));
   }
 
   function pickHit(hit: SearchHit) {

@@ -804,26 +804,7 @@ export function matchesResource(
   );
 }
 
-export function availabilityLabel(
-  resource: Resource,
-  slots: UserDashboardData["occupiedSlots"]
-): Availability {
-  const now = Date.now();
-  const busyNow = slots.some((slot) => {
-    if (slot.resourceId !== resource.id) {
-      return false;
-    }
-
-    return (
-      new Date(slot.startTime).getTime() <= now &&
-      new Date(slot.endTime).getTime() > now
-    );
-  });
-
-  if (busyNow) {
-    return "Unavailable";
-  }
-
+export function availabilityLabel(resource: Resource): Availability {
   if (resource.upcomingBookings >= 3) {
     return "Limited";
   }

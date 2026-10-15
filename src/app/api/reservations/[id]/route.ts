@@ -64,7 +64,7 @@ export async function PATCH(
     const body: unknown = await request.json();
 
     if (isPendingEdit(body)) {
-      return updatePendingReservation(auth.user.id, id, body);
+      return updatePendingReservation(request, auth.user.id, id, body);
     }
 
     const nextStatus =
@@ -461,6 +461,7 @@ function isPendingEdit(body: unknown): body is PendingEditBody {
 }
 
 async function updatePendingReservation(
+  request: Request,
   userId: string,
   id: string,
   body: PendingEditBody

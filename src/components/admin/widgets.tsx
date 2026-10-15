@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { ActivityGlyph, DownloadIcon } from "./icons";
 import { activityDot, activityIconColor, axisMax, formatShort, relativeTime, type ActivityItem, type ActivityKind, type AdminDashboardData } from "./model";
 
@@ -361,11 +361,11 @@ export function UsageDonut({
 }
 
 export function ActivityTime({ iso }: { iso: string }) {
-  const [label, setLabel] = useState(() => formatShort(iso));
-
-  useEffect(() => {
-    setLabel(relativeTime(iso));
-  }, [iso]);
+  const label = useSyncExternalStore(
+    () => () => {},
+    () => relativeTime(iso),
+    () => formatShort(iso)
+  );
 
   return <span className="shrink-0 text-xs text-slate-400">{label}</span>;
 }

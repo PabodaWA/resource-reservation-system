@@ -2,6 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { setLocalStorageValue, useLocalStorageValue } from "@/lib/use-local-storage-value";
 import ThemeToggle from "@/components/theme-toggle";
 import { jobPositionLabel } from "@/lib/job-position";
 import { RESOURCE_CATALOG, canBookMeetingRoom, categoryLabel, isMeetingRoom, maxBookingDurationMs, subcategoryLabel } from "@/lib/resource-catalog";
@@ -13,6 +15,10 @@ import { ResourceCard } from "@/components/member/browse";
 import { ResourceDetailView } from "@/components/member/resource-detail";
 import { UpcomingSchedule } from "@/components/member/schedule";
 import { addDays, availabilityLabel, buildActivity, categoryHint, defaultSlot, emptyBooking, emptyParty, formatBookingDate, formatDuration, inDateWindow, initials, inputClass, isResourceFree, matchesResource, openEndChoices, openStartChoices, resolveSlot, sections, slotsExceptReservation, startOfDay, timeChoices, toDateInput, type BrowseSort, type DateWindow, type ParticipantDraft, type Reservation, type ReservationFilter, type Resource, type Section, type UserDashboardData } from "@/components/member/model";
+
+function currentTimestamp() {
+  return Date.now();
+}
 
 export type { UserDashboardData } from "@/components/member/model";
 
@@ -44,9 +50,6 @@ export default function DashboardClient({
   const [browseCategory, setBrowseCategory] = useState("all");
   const [browseSort, setBrowseSort] = useState<BrowseSort>("az");
   const [menuOpen, setMenuOpen] = useState(false);
-  const [favouriteIds, setFavouriteIds] = useState<string[]>([]);
-  const [seenNoticeAt, setSeenNoticeAt] = useState(0);
-  const [clearedNoticeAt, setClearedNoticeAt] = useState(0);
   const [detailResourceId, setDetailResourceId] = useState("");
   const [viewReservationId, setViewReservationId] = useState("");
   const [photoIndex, setPhotoIndex] = useState(0);
@@ -54,6 +57,21 @@ export default function DashboardClient({
   const menuRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const favoriteKey = `resourcehub-favourites:${data.user.id}`;
+  const favouriteIdsValue = useLocalStorageValue(favoriteKey, "[]");
+  const favouriteIds = (() => {
+    try {
+      const stored: unknown = JSON.parse(favouriteIdsValue);
+      return Array.isArray(stored)
+        ? stored.filter((id): id is string => typeof id === "string")
+        : [];
+    } catch {
+      return [];
+    }
+  })();
+  const seenNoticeAt =
+    Number(useLocalStorageValue(`${favoriteKey}:seen`, "0")) || 0;
+  const clearedNoticeAt =
+    Number(useLocalStorageValue(`${favoriteKey}:cleared`, "0")) || 0;
 
   const firstName = data.user.name.trim().split(/\s+/)[0] || "there";
   const activeReservations = data.reservations.filter(
@@ -154,27 +172,6 @@ export default function DashboardClient({
   }, [data.reservations, filter, search, dateWindow]);
 
   useEffect(() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem(favoriteKey) || "[]");
-      if (Array.isArray(stored)) {
-        setFavouriteIds(stored.filter((id) => typeof id === "string"));
-      }
-    } catch {
-      setFavouriteIds([]);
-    }
-
-    const seen = Number(localStorage.getItem(`${favoriteKey}:seen`) || 0);
-    if (Number.isFinite(seen)) {
-      setSeenNoticeAt(seen);
-    }
-
-    const cleared = Number(localStorage.getItem(`${favoriteKey}:cleared`) || 0);
-    if (Number.isFinite(cleared)) {
-      setClearedNoticeAt(cleared);
-    }
-  }, [favoriteKey]);
-
-  useEffect(() => {
     if (!menuOpen) {
       return;
     }
@@ -212,18 +209,15 @@ export default function DashboardClient({
     }
 
     if (next === "notifications") {
-      const seenAt = Date.now();
-      setSeenNoticeAt(seenAt);
-      localStorage.setItem(`${favoriteKey}:seen`, String(seenAt));
+      const seenAt = currentTimestamp();
+      setLocalStorageValue(`${favoriteKey}:seen`, String(seenAt));
     }
   }
 
   function clearNotifications() {
     const clearedAt = Date.now();
-    setClearedNoticeAt(clearedAt);
-    setSeenNoticeAt(clearedAt);
-    localStorage.setItem(`${favoriteKey}:cleared`, String(clearedAt));
-    localStorage.setItem(`${favoriteKey}:seen`, String(clearedAt));
+    setLocalStorageValue(`${favoriteKey}:cleared`, String(clearedAt));
+    setLocalStorageValue(`${favoriteKey}:seen`, String(clearedAt));
   }
 
   function showReservations(next: ReservationFilter) {
@@ -233,13 +227,10 @@ export default function DashboardClient({
   }
 
   function toggleFavourite(resourceId: string) {
-    setFavouriteIds((current) => {
-      const next = current.includes(resourceId)
-        ? current.filter((id) => id !== resourceId)
-        : [...current, resourceId];
-      localStorage.setItem(favoriteKey, JSON.stringify(next));
-      return next;
-    });
+    const next = favouriteIds.includes(resourceId)
+      ? favouriteIds.filter((id) => id !== resourceId)
+      : [...favouriteIds, resourceId];
+    setLocalStorageValue(favoriteKey, JSON.stringify(next));
   }
 
   function openResourceDetail(resourceId: string) {
@@ -660,7 +651,7 @@ export default function DashboardClient({
   const previewResources = [...data.resources]
     .sort((a, b) => {
       const rank = (resource: Resource) =>
-        availabilityLabel(resource, data.occupiedSlots) === "Available" ? 0 : 1;
+        availabilityLabel(resource) === "Available" ? 0 : 1;
       return rank(a) - rank(b) || a.name.localeCompare(b.name);
     })
     .slice(0, 3);
@@ -713,7 +704,7 @@ export default function DashboardClient({
     <div className="h-screen overflow-hidden bg-[#f6f8fc] font-sans text-slate-900">
       <div className="flex h-full overflow-hidden bg-[#f6f8fc]">
         <aside className="hidden w-[280px] shrink-0 flex-col overflow-y-auto border-r border-slate-100 bg-white px-4 py-6 lg:flex">
-          <a href="/" className="flex items-center gap-3 px-2">
+          <Link href="/" className="flex items-center gap-3 px-2">
             <img
               src="/R%20logo.jpg"
               alt=""
@@ -727,7 +718,7 @@ export default function DashboardClient({
                 Resource Reservation System
               </p>
             </div>
-          </a>
+          </Link>
 
           <p className="mt-8 px-3 text-[11px] font-bold tracking-[0.14em] text-slate-400">
             MENU
@@ -1141,10 +1132,7 @@ export default function DashboardClient({
                               </p>
                               <div className="mt-3 flex items-center gap-2">
                                 <AvailabilityPill
-                                  label={availabilityLabel(
-                                    resource,
-                                    data.occupiedSlots
-                                  )}
+                                  label={availabilityLabel(resource)}
                                 />
                                 <button
                                   type="button"
@@ -1198,10 +1186,7 @@ export default function DashboardClient({
                               </span>
                             </button>
                             <AvailabilityPill
-                              label={availabilityLabel(
-                                resource,
-                                data.occupiedSlots
-                              )}
+                              label={availabilityLabel(resource)}
                             />
                             <HeartButton
                               active
@@ -1355,10 +1340,7 @@ export default function DashboardClient({
                         key={resource.id}
                         resource={resource}
                         favourite={favouriteIds.includes(resource.id)}
-                        availability={availabilityLabel(
-                          resource,
-                          data.occupiedSlots
-                        )}
+                        availability={availabilityLabel(resource)}
                         onFavourite={() => toggleFavourite(resource.id)}
                         onView={() => openResourceDetail(resource.id)}
                       />
@@ -1775,7 +1757,7 @@ export default function DashboardClient({
                 key={detailResource.id}
                 resource={detailResource}
                 favourite={favouriteIds.includes(detailResource.id)}
-                availability={availabilityLabel(detailResource, data.occupiedSlots)}
+                availability={availabilityLabel(detailResource)}
                 date={booking.date}
                 startClock={booking.startClock}
                 endClock={booking.endClock}
