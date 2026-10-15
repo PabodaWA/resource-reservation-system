@@ -261,6 +261,7 @@ export default function AdminDashboardClient({
     null
   );
   const [loggingOut, setLoggingOut] = useState(false);
+  const [clearedNoticeAt, setClearedNoticeAt] = useState(0);
   const [reviewingId, setReviewingId] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -279,11 +280,26 @@ export default function AdminDashboardClient({
 
   const weekDays = buildWeekDays(data.reservations, weekStart);
   const usage = buildUsage(data.resources);
+  const noticeKey = `resourcehub-notices:${data.admin.id}`;
   const activity = useMemo(() => buildActivity(data), [data]);
-  const recentActivity = activity.slice(0, 4);
-  const notificationCount = activity.filter((item) => {
+  const notifications = useMemo(
+    () =>
+      activity.filter(
+        (item) => new Date(item.at).getTime() > clearedNoticeAt
+      ),
+    [activity, clearedNoticeAt]
+  );
+  const recentActivity = notifications.slice(0, 4);
+  const notificationCount = notifications.filter((item) => {
     return Date.now() - new Date(item.at).getTime() < 7 * 24 * 60 * 60 * 1000;
   }).length;
+
+  useEffect(() => {
+    const cleared = Number(localStorage.getItem(`${noticeKey}:cleared`) || 0);
+    if (Number.isFinite(cleared)) {
+      setClearedNoticeAt(cleared);
+    }
+  }, [noticeKey]);
 
   const weekBookings = data.reservations.filter(
     (reservation) =>
@@ -591,6 +607,12 @@ export default function AdminDashboardClient({
     setMobileOpen(false);
     setAccountOpen(false);
     setSearchOpen(false);
+  }
+
+  function clearNotifications() {
+    const clearedAt = Date.now();
+    setClearedNoticeAt(clearedAt);
+    localStorage.setItem(`${noticeKey}:cleared`, String(clearedAt));
   }
 
   function pickHit(hit: SearchHit) {
@@ -1820,12 +1842,25 @@ export default function AdminDashboardClient({
 
             {section === "notifications" && (
               <section className="rounded-2xl border border-[#E8EEF5] bg-white p-5 shadow-[0_8px_24px_rgba(15,42,68,0.04)] sm:p-6">
-                <h2 className="text-lg font-bold">Recent activity</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  New accounts, resource changes, and reservation updates.
-                </p>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold">Recent activity</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      New accounts, resource changes, and reservation updates.
+                    </p>
+                  </div>
+                  {notifications.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearNotifications}
+                      className="shrink-0 rounded-xl border border-[#E2EAF3] px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-[#F5F8FB]"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
                 <ActivityList
-                  items={activity.slice(0, 30)}
+                  items={notifications.slice(0, 30)}
                   onOpen={(kind) =>
                     openSection(
                       kind === "user"

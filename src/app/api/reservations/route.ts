@@ -109,11 +109,16 @@ export async function POST(request: Request) {
       );
     }
 
-    if (
-      purpose !== undefined &&
-      purpose !== null &&
-      (typeof purpose !== "string" || purpose.length > 500)
-    ) {
+    const purposeText = typeof purpose === "string" ? purpose.trim() : "";
+
+    if (!purposeText) {
+      return NextResponse.json(
+        { message: "Enter a purpose for this booking." },
+        { status: 400 }
+      );
+    }
+
+    if (purposeText.length > 500) {
       return NextResponse.json(
         { message: "Purpose must be 500 characters or fewer." },
         { status: 400 }
@@ -282,10 +287,7 @@ export async function POST(request: Request) {
         return tx.reservation.create({
           data: {
             title,
-            purpose:
-              typeof purpose === "string" && purpose.trim()
-                ? purpose.trim()
-                : null,
+            purpose: purposeText,
             startTime: start,
             endTime: end,
             status: bookingNeedsApproval(

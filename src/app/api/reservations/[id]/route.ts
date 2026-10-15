@@ -344,12 +344,16 @@ async function updatePendingReservation(
     );
   }
 
-  if (
-    "purpose" in body &&
-    body.purpose !== null &&
-    body.purpose !== undefined &&
-    (typeof body.purpose !== "string" || body.purpose.length > 500)
-  ) {
+  const purpose = typeof body.purpose === "string" ? body.purpose.trim() : "";
+
+  if (!purpose) {
+    return NextResponse.json(
+      { message: "Enter a purpose for this booking." },
+      { status: 400 }
+    );
+  }
+
+  if (purpose.length > 500) {
     return NextResponse.json(
       { message: "Purpose must be 500 characters or fewer." },
       { status: 400 }
@@ -425,11 +429,6 @@ async function updatePendingReservation(
   const timeZone = isValidTimeZone(requestedTimeZone)
     ? requestedTimeZone
     : "UTC";
-  const purpose =
-    typeof body.purpose === "string" && body.purpose.trim()
-      ? body.purpose.trim()
-      : null;
-
   try {
     const reservation = await prisma.$transaction(
       async (tx) => {

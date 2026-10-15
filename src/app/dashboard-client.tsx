@@ -171,6 +171,7 @@ export default function DashboardClient({
   const [menuOpen, setMenuOpen] = useState(false);
   const [favouriteIds, setFavouriteIds] = useState<string[]>([]);
   const [seenNoticeAt, setSeenNoticeAt] = useState(0);
+  const [clearedNoticeAt, setClearedNoticeAt] = useState(0);
   const [detailResourceId, setDetailResourceId] = useState("");
   const [viewReservationId, setViewReservationId] = useState("");
   const [photoIndex, setPhotoIndex] = useState(0);
@@ -291,6 +292,11 @@ export default function DashboardClient({
     if (Number.isFinite(seen)) {
       setSeenNoticeAt(seen);
     }
+
+    const cleared = Number(localStorage.getItem(`${favoriteKey}:cleared`) || 0);
+    if (Number.isFinite(cleared)) {
+      setClearedNoticeAt(cleared);
+    }
   }, [favoriteKey]);
 
   useEffect(() => {
@@ -335,6 +341,14 @@ export default function DashboardClient({
       setSeenNoticeAt(seenAt);
       localStorage.setItem(`${favoriteKey}:seen`, String(seenAt));
     }
+  }
+
+  function clearNotifications() {
+    const clearedAt = Date.now();
+    setClearedNoticeAt(clearedAt);
+    setSeenNoticeAt(clearedAt);
+    localStorage.setItem(`${favoriteKey}:cleared`, String(clearedAt));
+    localStorage.setItem(`${favoriteKey}:seen`, String(clearedAt));
   }
 
   function showReservations(next: ReservationFilter) {
@@ -580,6 +594,13 @@ export default function DashboardClient({
       return;
     }
 
+    const purpose = booking.purpose.trim();
+
+    if (!purpose) {
+      setError("Enter a purpose for this booking.");
+      return;
+    }
+
     let filledPeople: { name: string; email: string }[];
 
     try {
@@ -607,7 +628,7 @@ export default function DashboardClient({
         body: JSON.stringify({
           resourceId: booking.resourceId,
           title: booking.title,
-          purpose: booking.purpose,
+          purpose,
           startTime: start.toISOString(),
           endTime: end.toISOString(),
           participants: filledPeople.map((person) => ({
@@ -752,7 +773,9 @@ export default function DashboardClient({
         (resource) => resource.id === editingReservation.resourceId
       ) ?? null)
     : null;
-  const activity = buildActivity(data.reservations);
+  const activity = buildActivity(data.reservations).filter(
+    (item) => new Date(item.at).getTime() > clearedNoticeAt
+  );
   const unreadCount = activity.filter(
     (item) => new Date(item.at).getTime() > seenNoticeAt
   ).length;
@@ -773,9 +796,9 @@ export default function DashboardClient({
     : [];
   const todayInput = toDateInput(new Date());
   const latestInput = toDateInput(addDays(startOfDay(new Date()), 90));
-  const upcomingList = [...inProgress, ...upcoming]
-    .filter((reservation) => reservation.status === "CONFIRMED")
-    .slice(0, 3);
+  const scheduleReservations = [...inProgress, ...upcoming].filter(
+    (reservation) => reservation.status === "CONFIRMED"
+  );
   const viewerCanBookMeetingRooms = canBookMeetingRoom(
     data.user.role,
     data.user.jobPosition
@@ -1163,63 +1186,17 @@ export default function DashboardClient({
                 <section className="grid items-start gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(280px,0.75fr)]">
                   <Panel
                     title="Upcoming Reservations"
-                    detail="Your confirmed reservations that are still ahead."
+                    detail="Confirmed bookings still ahead. Highlighted days have a schedule."
                     icon={<CalendarGlyph />}
                     action="View all"
                     onAction={() => showReservations("upcoming")}
                   >
-                    {upcomingList.length === 0 ? (
-                      <EmptyState
-                        title="No upcoming reservations"
-                        detail="Book a resource and it will show up here."
-                        actionLabel="Browse resources"
-                        onAction={() => openSection("book")}
-                      />
-                    ) : (
-                      <ul className="space-y-3">
-                        {upcomingList.map((reservation) => (
-                          <li key={reservation.id}>
-                            <button
-                              type="button"
-                              onClick={() => showReservations("upcoming")}
-                              className="flex w-full items-center gap-3 rounded-2xl border border-slate-100 p-2.5 text-left transition hover:border-blue-100 hover:bg-slate-50"
-                            >
-                              <ResourcePhoto
-                                resource={{
-                                  category: reservation.resourceCategory,
-                                  subcategory: reservation.resourceSubcategory,
-                                  name: reservation.resourceName,
-                                  location: reservation.resourceLocation,
-                                  images: data.resources.find(
-                                    (item) => item.id === reservation.resourceId
-                                  )?.images,
-                                }}
-                                className="h-16 w-24 rounded-xl"
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-semibold text-slate-900">
-                                  {reservation.resourceName}
-                                </p>
-                                <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
-                                  <PinIcon />
-                                  <span className="truncate">
-                                    {reservation.resourceLocation}
-                                  </span>
-                                </p>
-                                <p className="mt-1 text-xs text-slate-400">
-                                  {formatDashboardWhen(
-                                    reservation.startTime,
-                                    reservation.endTime
-                                  )}
-                                </p>
-                              </div>
-                              <StatusPill reservation={reservation} />
-                              <ChevronIcon direction="right" />
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+                    <UpcomingSchedule
+                      reservations={scheduleReservations}
+                      resources={data.resources}
+                      onOpen={openReservationView}
+                      onBrowse={() => openSection("book")}
+                    />
                   </Panel>
 
                   <Panel
@@ -1632,8 +1609,9 @@ export default function DashboardClient({
                         className={inputClass}
                       />
                     </FormField>
-                    <FormField label="Purpose (optional)">
+                    <FormField label="Purpose">
                       <input
+                        required
                         maxLength={500}
                         value={booking.purpose}
                         onChange={(event) =>
@@ -1847,10 +1825,23 @@ export default function DashboardClient({
 
             {section === "notifications" && (
               <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-                <h2 className="text-lg font-bold text-slate-900">Notifications</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Confirmations, completions, and cancellations on your account.
-                </p>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-lg font-bold text-slate-900">Notifications</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Confirmations, completions, and cancellations on your account.
+                    </p>
+                  </div>
+                  {activity.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={clearNotifications}
+                      className="shrink-0 rounded-xl border border-slate-200 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
                 {activity.length === 0 ? (
                   <EmptyState
                     title="You are all caught up"
@@ -2479,8 +2470,9 @@ function ResourceDetailView({
                       className={inputClass}
                     />
                   </FormField>
-                  <FormField label="Purpose (optional)">
+                  <FormField label="Purpose">
                     <input
+                      required
                       maxLength={500}
                       value={purpose}
                       onChange={(event) => onPurpose(event.target.value)}
@@ -2809,6 +2801,235 @@ function resourceFacilities(resource: Resource) {
   }
 
   return "";
+}
+
+function UpcomingSchedule({
+  reservations,
+  resources,
+  onOpen,
+  onBrowse,
+}: {
+  reservations: Reservation[];
+  resources: Resource[];
+  onOpen: (reservation: Reservation) => void;
+  onBrowse: () => void;
+}) {
+  const today = startOfDay(new Date());
+  const todayKey = toDateInput(today);
+  const anchorKey = scheduleAnchor(reservations, todayKey);
+  const [month, setMonth] = useState(() =>
+    monthStart(combineLocal(anchorKey, "12:00"))
+  );
+  const [selectedKey, setSelectedKey] = useState(anchorKey);
+  const bookedDays = useMemo(() => {
+    const map = new Map<string, Reservation[]>();
+
+    for (const reservation of reservations) {
+      for (const key of reservationDayKeys(reservation)) {
+        const list = map.get(key);
+
+        if (list) {
+          list.push(reservation);
+        } else {
+          map.set(key, [reservation]);
+        }
+      }
+    }
+
+    for (const list of map.values()) {
+      list.sort(
+        (a, b) =>
+          new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
+      );
+    }
+
+    return map;
+  }, [reservations]);
+  const days = calendarDays(month);
+  const selected = bookedDays.get(selectedKey) ?? [];
+  const summary = dateSummary(selectedKey);
+  const monthLabel = new Intl.DateTimeFormat("en-US", {
+    month: "long",
+    year: "numeric",
+  }).format(month);
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)] lg:items-start">
+      <div>
+        <div className="flex items-center justify-between gap-2">
+          <button
+            type="button"
+            aria-label="Previous month"
+            onClick={() => setMonth(addMonths(month, -1))}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+          >
+            <ChevronIcon direction="left" />
+          </button>
+          <p className="text-sm font-semibold text-slate-900">{monthLabel}</p>
+          <button
+            type="button"
+            aria-label="Next month"
+            onClick={() => setMonth(addMonths(month, 1))}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-600 hover:bg-slate-100"
+          >
+            <ChevronIcon direction="right" />
+          </button>
+        </div>
+
+        <div
+          className="mt-3 grid grid-cols-7 text-center text-[11px] font-medium uppercase tracking-wide text-slate-400"
+          aria-hidden="true"
+        >
+          {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((label) => (
+            <span key={label} className="flex h-8 items-center justify-center">
+              {label}
+            </span>
+          ))}
+        </div>
+
+        <div
+          className="grid grid-cols-7"
+          role="group"
+          aria-label="Upcoming schedule"
+        >
+          {days.map((day, index) => {
+            if (!day) {
+              return <span key={`empty-${index}`} className="h-10" />;
+            }
+
+            const key = toDateInput(day);
+            const count = bookedDays.get(key)?.length ?? 0;
+            const isSelected = key === selectedKey;
+            const isToday = key === todayKey;
+            const label = new Intl.DateTimeFormat("en-US", {
+              weekday: "long",
+              month: "long",
+              day: "numeric",
+            }).format(day);
+
+            return (
+              <button
+                key={key}
+                type="button"
+                aria-pressed={isSelected}
+                aria-label={
+                  count === 0
+                    ? label
+                    : `${label}, ${count} booking${count === 1 ? "" : "s"}`
+                }
+                onClick={() => setSelectedKey(key)}
+                className={`mx-auto flex h-10 w-10 flex-col items-center justify-center rounded-full text-sm ${
+                  isSelected
+                    ? "bg-[#3b82f6] font-semibold text-white"
+                    : isToday
+                      ? "font-semibold text-[#2563eb] ring-1 ring-[#93c5fd] hover:bg-blue-50"
+                      : "text-slate-700 hover:bg-slate-100"
+                }`}
+              >
+                <span className="leading-none">{day.getDate()}</span>
+                <span
+                  className={`mt-1 h-1 w-1 rounded-full ${
+                    count === 0
+                      ? "bg-transparent"
+                      : isSelected
+                        ? "bg-white"
+                        : "bg-[#3b82f6]"
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-2 flex items-center justify-between border-t border-slate-100 pt-2">
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedKey(todayKey);
+              setMonth(monthStart(today));
+            }}
+            className="rounded-md px-2 py-1 text-xs font-semibold text-[#2563eb] hover:bg-blue-50"
+          >
+            Today
+          </button>
+          <p className="flex items-center gap-1.5 text-[11px] text-slate-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-[#3b82f6]" />
+            Booked day
+          </p>
+        </div>
+      </div>
+
+      <div className="min-w-0 border-t border-slate-100 pt-4 lg:border-l lg:border-t-0 lg:pl-4 lg:pt-0">
+        <p className="text-sm font-semibold text-slate-900" aria-live="polite">
+          {summary.title}
+        </p>
+        <p className="mt-0.5 text-xs text-slate-500">
+          {selected.length === 0
+            ? summary.detail
+            : `${summary.detail} · ${selected.length} booking${selected.length === 1 ? "" : "s"}`}
+        </p>
+
+        {selected.length === 0 ? (
+          reservations.length === 0 ? (
+            <EmptyState
+              title="No upcoming reservations"
+              detail="Book a resource and it will show up here."
+              actionLabel="Browse resources"
+              onAction={onBrowse}
+            />
+          ) : (
+            <p className="mt-4 text-sm leading-6 text-slate-500">
+              Nothing is scheduled on this day.
+            </p>
+          )
+        ) : (
+          <ul className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+            {selected.map((reservation) => (
+              <li key={`${reservation.id}-${selectedKey}`}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(reservation)}
+                  className="flex w-full items-center gap-3 rounded-2xl border border-slate-100 p-2.5 text-left transition hover:border-blue-100 hover:bg-slate-50"
+                >
+                  <ResourcePhoto
+                    resource={{
+                      category: reservation.resourceCategory,
+                      subcategory: reservation.resourceSubcategory,
+                      name: reservation.resourceName,
+                      location: reservation.resourceLocation,
+                      images: resources.find(
+                        (item) => item.id === reservation.resourceId
+                      )?.images,
+                    }}
+                    className="h-14 w-20 rounded-xl"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-[#2563eb]">
+                      {formatClockSpan(
+                        reservation.startTime,
+                        reservation.endTime
+                      )}
+                    </p>
+                    <p className="mt-1 truncate text-sm font-semibold text-slate-900">
+                      {reservation.resourceName}
+                    </p>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                      <PinIcon />
+                      <span className="truncate">
+                        {reservation.resourceLocation}
+                      </span>
+                    </p>
+                  </div>
+                  <StatusPill reservation={reservation} />
+                  <ChevronIcon direction="right" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function Panel({
@@ -4093,6 +4314,11 @@ function PendingEditDialog({
       return;
     }
 
+    if (!purpose.trim()) {
+      setFormError("Enter a purpose for this booking.");
+      return;
+    }
+
     let filledPeople: { name: string; email: string }[] = [];
 
     try {
@@ -4231,8 +4457,9 @@ function PendingEditDialog({
               className={inputClass}
             />
           </FormField>
-          <FormField label="Purpose (optional)">
+          <FormField label="Purpose">
             <input
+              required
               maxLength={500}
               value={purpose}
               onChange={(event) => setPurpose(event.target.value)}
@@ -4819,6 +5046,45 @@ function addMonths(date: Date, count: number) {
   return new Date(date.getFullYear(), date.getMonth() + count, 1);
 }
 
+function scheduleAnchor(reservations: Reservation[], todayKey: string) {
+  for (const reservation of reservations) {
+    if (reservationDayKeys(reservation).includes(todayKey)) {
+      return todayKey;
+    }
+  }
+
+  const next = reservations[0];
+
+  if (!next) {
+    return todayKey;
+  }
+
+  return reservationDayKeys(next)[0] ?? todayKey;
+}
+
+function reservationDayKeys(reservation: Reservation) {
+  const start = startOfDay(new Date(reservation.startTime));
+  const end = new Date(reservation.endTime);
+  const endsAtMidnight =
+    end.getHours() === 0 &&
+    end.getMinutes() === 0 &&
+    end.getSeconds() === 0 &&
+    end.getMilliseconds() === 0;
+  const last = endsAtMidnight ? startOfDay(addDays(end, -1)) : startOfDay(end);
+  const stop = last < start ? start : last;
+  const keys: string[] = [];
+
+  for (
+    let cursor = new Date(start);
+    cursor.getTime() <= stop.getTime() && keys.length < 14;
+    cursor = addDays(cursor, 1)
+  ) {
+    keys.push(toDateInput(cursor));
+  }
+
+  return keys;
+}
+
 function calendarDays(month: Date) {
   const firstWeekday = monthStart(month).getDay();
   const count = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
@@ -5132,22 +5398,6 @@ function formatBookingLength(ms: number) {
   }
 
   return `${hourLabel} ${minuteLabel}`;
-}
-
-function formatDashboardWhen(startIso: string, endIso: string) {
-  const start = new Date(startIso);
-  const end = new Date(endIso);
-  const date = new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-  const time = new Intl.DateTimeFormat("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-
-  return `${date.format(start)}  |  ${time.format(start)} - ${time.format(end)}`;
 }
 
 function formatShortDate(iso: string) {
