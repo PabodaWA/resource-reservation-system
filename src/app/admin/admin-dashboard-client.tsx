@@ -9,6 +9,10 @@ import {
   type JobPosition,
 } from "@/lib/job-position";
 import { MAX_RESOURCE_IMAGES } from "@/lib/resource-images";
+import {
+  isResourceLocation,
+  RESOURCE_LOCATIONS,
+} from "@/lib/resource-locations";
 
 export type AdminDashboardData = {
   admin: {
@@ -23,6 +27,7 @@ export type AdminDashboardData = {
     role: "ADMIN" | "MEMBER";
     jobPosition: JobPosition;
     isActive: boolean;
+    lockedUntil: string | null;
     createdAt: string;
   }[];
   resources: {
@@ -167,6 +172,10 @@ const emptyUser = {
   jobPosition: "" as JobPosition | "",
 };
 
+function isAccountLocked(lockedUntil: string | null) {
+  return lockedUntil !== null && new Date(lockedUntil).getTime() > Date.now();
+}
+
 function emailAlreadyUsed(
   users: { id: string; email: string }[],
   email: string,
@@ -182,7 +191,7 @@ function emailAlreadyUsed(
 
 const emptyResource = {
   name: "",
-  type: "MEETING_ROOM",
+  type: "",
   location: "",
   capacity: "1",
   description: "",
@@ -220,6 +229,7 @@ export default function AdminDashboardClient({
   const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [savingUser, setSavingUser] = useState(false);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
+  const [unlockingUserId, setUnlockingUserId] = useState<string | null>(null);
   const [userRoleFilter, setUserRoleFilter] = useState<
     "all" | "ADMIN" | "MEMBER"
   >("all");
@@ -354,12 +364,14 @@ export default function AdminDashboardClient({
 
       const roleLabel = user.role === "ADMIN" ? "admin" : "user";
       const positionLabel = jobPositionLabel(user.jobPosition).toLowerCase();
+      const lockLabel = isAccountLocked(user.lockedUntil) ? "locked" : "";
 
       return (
         user.name.toLowerCase().includes(term) ||
         user.email.toLowerCase().includes(term) ||
         roleLabel.includes(term) ||
-        positionLabel.includes(term)
+        positionLabel.includes(term) ||
+        lockLabel.includes(term)
       );
     });
 
@@ -851,6 +863,39 @@ export default function AdminDashboardClient({
     }
   }
 
+  async function handleUnlockUser(user: AdminDashboardData["users"][number]) {
+    setError("");
+    setSuccess("");
+
+    const confirmed = window.confirm(
+      `Unlock ${user.name}? They will be able to sign in again.`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setUnlockingUserId(user.id);
+
+    try {
+      const response = await fetch(`/api/users/${user.id}/unlock`, {
+        method: "POST",
+      });
+      const payload: { message?: string } = await response.json();
+
+      if (!response.ok) {
+        throw new Error(payload.message || "Unable to unlock this account.");
+      }
+
+      setSuccess(payload.message || `${user.name} can sign in again.`);
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setUnlockingUserId(null);
+    }
+  }
+
   async function handleCreateResource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -861,13 +906,18 @@ export default function AdminDashboardClient({
     const description = resourceForm.description.trim();
     const capacity = Number(resourceForm.capacity);
 
+    if (!resourceTypes.some((type) => type.value === resourceForm.type)) {
+      setError("Choose a category.");
+      return;
+    }
+
     if (!name || name.length > 120) {
       setError("Resource name must be between 1 and 120 characters.");
       return;
     }
 
-    if (!location || location.length > 160) {
-      setError("Location must be between 1 and 160 characters.");
+    if (!isResourceLocation(location)) {
+      setError("Choose Garage A, Garage B, or a floor from 1st to 4th.");
       return;
     }
 
@@ -972,13 +1022,27 @@ export default function AdminDashboardClient({
     const description = resourceForm.description.trim();
     const capacity = Number(resourceForm.capacity);
 
+    const currentResource = data.resources.find(
+      (resource) => resource.id === editingResourceId
+    );
+
+    if (
+      !resourceTypes.some((type) => type.value === resourceForm.type) &&
+      resourceForm.type !== currentResource?.type
+    ) {
+      setError("Choose a category.");
+      return;
+    }
+
     if (!name || name.length > 120) {
       setError("Resource name must be between 1 and 120 characters.");
       return;
     }
 
-    if (!location || location.length > 160) {
-      setError("Location must be between 1 and 160 characters.");
+    const currentLocation = currentResource?.location;
+
+    if (!isResourceLocation(location) && location !== currentLocation) {
+      setError("Choose Garage A, Garage B, or a floor from 1st to 4th.");
       return;
     }
 
@@ -1558,6 +1622,7 @@ export default function AdminDashboardClient({
                 statusFilter={userStatusFilter}
                 sort={userSort}
                 deletingUserId={deletingUserId}
+                unlockingUserId={unlockingUserId}
                 currentUserId={data.admin.id}
                 onSearch={(value) => {
                   setUserSearch(value);
@@ -1577,6 +1642,7 @@ export default function AdminDashboardClient({
                 }}
                 onPage={setUserPage}
                 onEdit={openEditUser}
+                onUnlock={(user) => void handleUnlockUser(user)}
                 onDelete={(user) => void handleDeleteUser(user)}
               />
             )}
@@ -1986,6 +2052,7 @@ function UsersPanel({
   statusFilter,
   sort,
   deletingUserId,
+  unlockingUserId,
   currentUserId,
   onSearch,
   onRole,
@@ -1993,6 +2060,7 @@ function UsersPanel({
   onSort,
   onPage,
   onEdit,
+  onUnlock,
   onDelete,
 }: {
   users: AdminDashboardData["users"];
@@ -2003,6 +2071,7 @@ function UsersPanel({
   statusFilter: "all" | "active" | "inactive";
   sort: "name-asc" | "name-desc" | "joined-desc" | "joined-asc";
   deletingUserId: string | null;
+  unlockingUserId: string | null;
   currentUserId: string;
   onSearch: (value: string) => void;
   onRole: (value: "all" | "ADMIN" | "MEMBER") => void;
@@ -2012,6 +2081,7 @@ function UsersPanel({
   ) => void;
   onPage: (page: number) => void;
   onEdit: (user: AdminDashboardData["users"][number]) => void;
+  onUnlock: (user: AdminDashboardData["users"][number]) => void;
   onDelete: (user: AdminDashboardData["users"][number]) => void;
 }) {
   const total = users.length;
@@ -2206,24 +2276,41 @@ function UsersPanel({
                       {jobPositionLabel(user.jobPosition)}
                     </td>
                     <td className="px-2 py-3">
-                      <span
-                        className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
-                          user.isActive ? "text-emerald-500" : "text-rose-500"
-                        }`}
-                      >
+                      {isAccountLocked(user.lockedUntil) ? (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-600">
+                          <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                          Locked
+                        </span>
+                      ) : (
                         <span
-                          className={`h-1.5 w-1.5 rounded-full ${
-                            user.isActive ? "bg-emerald-500" : "bg-rose-500"
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+                            user.isActive ? "text-emerald-500" : "text-rose-500"
                           }`}
-                        />
-                        {user.isActive ? "Active" : "Inactive"}
-                      </span>
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              user.isActive ? "bg-emerald-500" : "bg-rose-500"
+                            }`}
+                          />
+                          {user.isActive ? "Active" : "Inactive"}
+                        </span>
+                      )}
                     </td>
                     <td className="px-2 py-3 text-slate-500">
                       {formatJoined(user.createdAt)}
                     </td>
                     <td className="px-4 py-3">
                       <span className="flex justify-end gap-2">
+                        {isAccountLocked(user.lockedUntil) && (
+                          <button
+                            type="button"
+                            disabled={unlockingUserId !== null}
+                            onClick={() => onUnlock(user)}
+                            className="h-8 rounded-lg border border-amber-200 px-2.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                          >
+                            {unlockingUserId === user.id ? "Unlocking..." : "Unlock"}
+                          </button>
+                        )}
                         <button
                           type="button"
                           aria-label={`Edit ${user.name}`}
@@ -2432,7 +2519,10 @@ function ResourcesPanel({
     a.localeCompare(b)
   );
   const locationOptions = [
-    ...new Set(resources.map((resource) => resource.location)),
+    ...new Set([
+      ...RESOURCE_LOCATIONS,
+      ...resources.map((resource) => resource.location),
+    ]),
   ].sort((a, b) => a.localeCompare(b));
   const metricTones = [
     "bg-[#E8F8EF] text-[#22A06B]",
@@ -2778,12 +2868,20 @@ function ResourceDialog({
   onCreate: (event: FormEvent<HTMLFormElement>) => void;
   onUpdate: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const typeChoices = resourceTypes.some((type) => type.value === form.type)
-    ? resourceTypes
-    : [
-        ...resourceTypes,
-        { value: form.type, label: labelType(form.type) },
-      ];
+  const typeChoices =
+    !form.type || resourceTypes.some((type) => type.value === form.type)
+      ? resourceTypes
+      : [
+          ...resourceTypes,
+          { value: form.type, label: labelType(form.type) },
+        ];
+  const locationChoices = (
+    RESOURCE_LOCATIONS as readonly string[]
+  ).includes(form.location)
+    ? RESOURCE_LOCATIONS
+    : form.location
+      ? [form.location, ...RESOURCE_LOCATIONS]
+      : RESOURCE_LOCATIONS;
   const [photoError, setPhotoError] = useState("");
   const [readingPhotos, setReadingPhotos] = useState(false);
 
@@ -2938,6 +3036,27 @@ function ResourceDialog({
         </p>
 
         <label className="mt-5 block text-sm font-medium text-slate-700">
+          Category
+          <select
+            required
+            value={form.type}
+            onChange={(event) =>
+              onChange({ ...form, type: event.target.value })
+            }
+            className={`${inputClass} mt-2`}
+          >
+            <option value="" disabled>
+              Select a category
+            </option>
+            {typeChoices.map((type) => (
+              <option key={type.value} value={type.value}>
+                {type.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="mt-4 block text-sm font-medium text-slate-700">
           Name
           <input
             required
@@ -2952,34 +3071,24 @@ function ResourceDialog({
         </label>
 
         <label className="mt-4 block text-sm font-medium text-slate-700">
-          Category
-          <select
-            value={form.type}
-            onChange={(event) =>
-              onChange({ ...form, type: event.target.value })
-            }
-            className={`${inputClass} mt-2`}
-          >
-            {typeChoices.map((type) => (
-              <option key={type.value} value={type.value}>
-                {type.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="mt-4 block text-sm font-medium text-slate-700">
           Location
-          <input
+          <select
             required
             value={form.location}
             onChange={(event) =>
               onChange({ ...form, location: event.target.value })
             }
-            maxLength={160}
             className={`${inputClass} mt-2`}
-            placeholder="2nd floor, west wing"
-          />
+          >
+            <option value="" disabled>
+              Select a location
+            </option>
+            {locationChoices.map((location) => (
+              <option key={location} value={location}>
+                {location}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="mt-4 block text-sm font-medium text-slate-700">

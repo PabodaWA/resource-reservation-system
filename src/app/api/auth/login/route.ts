@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { createSession } from "@/lib/auth";
 
 const MAX_FAILED_ATTEMPTS = 3;
-const LOCK_DURATION_MS = 15 * 60 * 1000;
+const LOCK_DURATION_MS = 60 * 60 * 1000;
 
 function invalidCredentials() {
   return NextResponse.json(
@@ -56,7 +56,8 @@ export async function POST(request: Request) {
     if (user.lockedUntil && user.lockedUntil > now) {
       return NextResponse.json(
         {
-          message: "Account temporarily locked. Please try again later.",
+          message:
+            "Account locked. Contact an administrator to unlock it, or try again after the lock expires.",
         },
         { status: 423 }
       );
@@ -99,7 +100,7 @@ export async function POST(request: Request) {
         return NextResponse.json(
           {
             message:
-              "Too many failed attempts. Account locked for 15 minutes.",
+              "Too many failed attempts. Account locked for 1 hour. Contact an administrator to unlock it sooner.",
           },
           { status: 423 }
         );
