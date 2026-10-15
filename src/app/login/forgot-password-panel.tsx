@@ -207,7 +207,7 @@ export default function ForgotPasswordPanel({
 
   return (
     <div>
-      <h3 className="text-[2.85rem] leading-[1.05] font-bold tracking-tight text-[#10284f]">
+      <h3 className="pr-14 text-[2.85rem] leading-[1.05] font-bold tracking-tight text-[#10284f]">
         Reset your password
       </h3>
       <p className="mt-3 text-[1.05rem] leading-relaxed text-slate-500">

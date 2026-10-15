@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import ThemeToggle from "@/components/theme-toggle";
 import {
   MEMBER_JOB_POSITIONS,
   isJobPosition,
@@ -151,12 +152,12 @@ const sectionCopy: Record<Section, { title: string; detail: string }> = {
 };
 
 const sliceColors = [
-  "#5B9DFF",
-  "#7DD3FC",
-  "#C4B5FD",
-  "#F9A8D4",
-  "#6EE7B7",
-  "#FDBA74",
+  "#2563EB",
+  "#0284C7",
+  "#7C3AED",
+  "#DB2777",
+  "#059669",
+  "#EA580C",
 ];
 
 const inputClass =
@@ -1287,6 +1288,7 @@ export default function AdminDashboardClient({
               )}
             </div>
 
+            <ThemeToggle />
             <button
               type="button"
               aria-label="Notifications"
@@ -1503,13 +1505,13 @@ export default function AdminDashboardClient({
                   <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#E8EEF5] bg-white p-4 shadow-[0_8px_24px_rgba(15,42,68,0.04)] xl:col-span-3">
                     <div className="flex shrink-0 flex-wrap items-center justify-between gap-3">
                       <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700">
-                        <span className="text-[#5B9DFF]">
+                        <span className="text-[#2563EB]">
                           <ChartIcon />
                         </span>
                         Reservations This Week
                       </h2>
                       <span className="flex items-center gap-2 text-xs text-slate-400">
-                        <span className="h-2 w-2 rounded-full bg-[#8EBEFF]" />
+                        <span className="h-2 w-2 rounded-full bg-[#2563EB]" />
                         Total Reservations
                       </span>
                     </div>
@@ -1518,7 +1520,7 @@ export default function AdminDashboardClient({
 
                   <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#E8EEF5] bg-white p-4 shadow-[0_8px_24px_rgba(15,42,68,0.04)] xl:col-span-2">
                     <h2 className="flex shrink-0 items-center gap-2 text-base font-semibold text-slate-700">
-                      <span className="text-[#8B5CF6]">
+                      <span className="text-[#6D28D9]">
                         <DonutIcon />
                       </span>
                       Resource Usage
@@ -1531,7 +1533,7 @@ export default function AdminDashboardClient({
                   <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#E8EEF5] bg-white p-4 shadow-[0_8px_24px_rgba(15,42,68,0.04)] xl:col-span-3">
                     <div className="flex shrink-0 items-center justify-between gap-3">
                       <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700">
-                        <span className="text-[#5B9DFF]">
+                        <span className="text-[#2563EB]">
                           <CalendarIcon />
                         </span>
                         Recent Reservations
@@ -1596,7 +1598,7 @@ export default function AdminDashboardClient({
                   <article className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-[#E8EEF5] bg-white p-4 shadow-[0_8px_24px_rgba(15,42,68,0.04)] xl:col-span-2">
                     <div className="flex shrink-0 items-center justify-between gap-3">
                       <h2 className="flex items-center gap-2 text-base font-semibold text-slate-700">
-                        <span className="text-[#F59E0B]">
+                        <span className="text-[#D97706]">
                           <ClockIcon />
                         </span>
                         Recent Activity
@@ -3350,21 +3352,21 @@ function StatCard({
   onClick?: () => void;
 }) {
   const tones = {
-    blue: "bg-[#E8F2FF] text-[#3B82F6]",
-    purple: "bg-[#F3E8FF] text-[#8B5CF6]",
-    green: "bg-[#E8F8EF] text-[#22A06B]",
-    orange: "bg-[#FFF4E5] text-[#F5A524]",
+    blue: "bg-[#DBEAFE] text-[#1D4ED8]",
+    purple: "bg-[#EDE9FE] text-[#6D28D9]",
+    green: "bg-[#D1FAE5] text-[#047857]",
+    orange: "bg-[#FFEDD5] text-[#C2410C]",
   };
   const trendTone = alert
     ? change > 0
-      ? "text-[#F5A524]"
+      ? "text-[#C2410C]"
       : change < 0
-        ? "text-emerald-500"
+        ? "text-emerald-600"
         : "text-slate-400"
     : change > 0
-      ? "text-emerald-500"
+      ? "text-emerald-600"
       : change < 0
-        ? "text-rose-500"
+        ? "text-rose-600"
         : "text-slate-400";
   const arrow = change > 0 ? "↑" : change < 0 ? "↓" : "•";
   const signed = `${change > 0 ? "+" : ""}${change}%`;
@@ -4130,7 +4132,7 @@ function WeekBars({ days }: { days: { label: string; value: number }[] }) {
                   className="flex h-full flex-1 items-end justify-center"
                 >
                   <div
-                    className="w-full max-w-10 rounded-t-lg bg-[#8EBEFF]"
+                    className="w-full max-w-10 rounded-t-lg bg-[#2563EB]"
                     style={{
                       height: day.value === 0 ? 0 : `${(day.value / max) * 100}%`,
                       minHeight: day.value > 0 ? 6 : 0,
@@ -4177,6 +4179,7 @@ function UsageDonut({
             cy="80"
             r={radius}
             fill="none"
+            className="chart-track"
             stroke="#EEF3F8"
             strokeWidth="18"
           />
@@ -4207,6 +4210,7 @@ function UsageDonut({
           x="80"
           y="76"
           textAnchor="middle"
+          className="chart-total"
           fill="#1e293b"
           fontSize="22"
           fontWeight="700"
@@ -4217,6 +4221,7 @@ function UsageDonut({
           x="80"
           y="96"
           textAnchor="middle"
+          className="chart-caption"
           fill="#94a3b8"
           fontSize="11"
         >
@@ -4733,17 +4738,17 @@ function buildActivity(data: AdminDashboardData): ActivityItem[] {
 }
 
 function activityDot(kind: ActivityKind) {
-  if (kind === "reservation") return "bg-emerald-400";
-  if (kind === "resource") return "bg-amber-400";
-  if (kind === "user") return "bg-[#5B9DFF]";
-  return "bg-rose-400";
+  if (kind === "reservation") return "bg-emerald-600";
+  if (kind === "resource") return "bg-[#D97706]";
+  if (kind === "user") return "bg-[#2563EB]";
+  return "bg-rose-600";
 }
 
 function activityIconColor(kind: ActivityKind) {
-  if (kind === "reservation") return "text-emerald-500";
-  if (kind === "resource") return "text-amber-500";
-  if (kind === "user") return "text-[#5B9DFF]";
-  return "text-rose-500";
+  if (kind === "reservation") return "text-emerald-600";
+  if (kind === "resource") return "text-[#D97706]";
+  if (kind === "user") return "text-[#2563EB]";
+  return "text-rose-600";
 }
 
 function percentChange(current: number, previous: number) {

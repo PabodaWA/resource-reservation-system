@@ -1,0 +1,319 @@
+/*
+ * Class-based dark theme. Surfaces, text, and tinted badges are remapped
+ * here so the existing light-mode utilities pick up dark colors.
+ * Solid brand fills (blue, red, amber buttons) stay as they are.
+ */
+
+html.dark {
+  --background: #0b1220;
+  --foreground: #e8eef7;
+  --tw-ring-offset-color: #162033;
+  color-scheme: dark;
+}
+
+html.dark body {
+  background: #0b1220;
+  color: #e8eef7;
+}
+
+html.dark .login-hero {
+  filter: brightness(0.38) saturate(0.85);
+}
+
+html.dark .chart-track {
+  stroke: #2a3a52;
+}
+
+html.dark .chart-total {
+  fill: #e8eef7;
+}
+
+html.dark .chart-caption {
+  fill: #93a2b8;
+}
+
+html.dark .from-\[\#e7f3ff\].via-\[\#f3f9ff\].to-\[\#d7ebff\] {
+  background-image: linear-gradient(to right, #132743, #1a3358, #10233f);
+}
+
+html.dark input:-webkit-autofill,
+html.dark input:-webkit-autofill:hover,
+html.dark input:-webkit-autofill:focus,
+html.dark textarea:-webkit-autofill,
+html.dark select:-webkit-autofill {
+  -webkit-text-fill-color: #e8eef7;
+  caret-color: #e8eef7;
+  box-shadow: 0 0 0 1000px #162033 inset;
+  transition: background-color 9999s ease-out;
+}
+
+/* Surfaces */
+html.dark .bg-white,
+html.dark .hover\:bg-white:hover {
+  background-color: #162033;
+}
+
+html.dark .bg-white\/80 {
+  background-color: rgb(22 32 51 / 0.86);
+}
+
+html.dark .bg-white\/90 {
+  background-color: rgb(22 32 51 / 0.92);
+}
+
+html.dark .bg-slate-50,
+html.dark .bg-slate-100,
+html.dark .disabled\:bg-slate-50:disabled,
+html.dark .disabled\:bg-slate-100:disabled {
+  background-color: #1a2436;
+}
+
+html.dark .hover\:bg-slate-50:hover,
+html.dark .hover\:bg-slate-100:hover,
+html.dark .hover\:bg-\[\#F5F8FB\]:hover,
+html.dark .hover\:bg-\[\#F5F9FC\]:hover {
+  background-color: #243044;
+}
+
+html.dark .disabled\:hover\:bg-transparent:disabled:hover {
+  background-color: transparent;
+}
+
+html.dark .bg-\[\#F4F7FB\],
+html.dark .bg-\[\#f6f8fc\],
+html.dark .bg-\[\#d7e7f5\] {
+  background-color: #0b1220;
+}
+
+html.dark .bg-\[\#F8FBFF\],
+html.dark .hover\:bg-\[\#eaf2ff\]:hover,
+html.dark .hover\:bg-\[\#EFF6FF\]:hover,
+html.dark .hover\:bg-blue-50:hover,
+html.dark .bg-blue-50,
+html.dark .bg-sky-50,
+html.dark .bg-\[\#E8F2FF\],
+html.dark .bg-\[\#e8f2ff\],
+html.dark .bg-\[\#e8f1ff\],
+html.dark .bg-\[\#eef6ff\],
+html.dark .bg-\[\#e7f1ff\],
+html.dark .bg-\[\#f3f8ff\],
+html.dark .bg-\[\#f4f8ff\],
+html.dark .bg-\[\#DBEAFE\],
+html.dark .bg-\[\#dbeafe\],
+html.dark .bg-\[\#E0F7FA\] {
+  background-color: #1a3054;
+}
+
+html.dark .bg-\[\#f3eefe\],
+html.dark .bg-\[\#EDE9FE\],
+html.dark .bg-\[\#F3E8FF\],
+html.dark .bg-\[\#FCE7F3\] {
+  background-color: #2a2144;
+}
+
+html.dark .bg-emerald-50,
+html.dark .bg-green-50,
+html.dark .hover\:bg-emerald-50:hover,
+html.dark .bg-\[\#e7f8ee\],
+html.dark .bg-\[\#D1FAE5\],
+html.dark .bg-\[\#DCFCE7\],
+html.dark .bg-\[\#E8F8EF\] {
+  background-color: #123528;
+}
+
+html.dark .bg-amber-50,
+html.dark .hover\:bg-amber-50:hover,
+html.dark .bg-\[\#fff4d6\],
+html.dark .bg-\[\#fff4e5\],
+html.dark .bg-\[\#FFF4E5\],
+html.dark .bg-\[\#FFF4E0\],
+html.dark .bg-\[\#FFEDD5\] {
+  background-color: #3a2a12;
+}
+
+html.dark .bg-red-50,
+html.dark .bg-rose-50,
+html.dark .hover\:bg-red-50:hover,
+html.dark .hover\:bg-rose-50:hover,
+html.dark .bg-\[\#fde8e8\],
+html.dark .bg-\[\#FEE2E2\] {
+  background-color: #3a1820;
+}
+
+/* Borders */
+html.dark .border-slate-100,
+html.dark .border-slate-200,
+html.dark .border-slate-200\/80,
+html.dark .border-slate-300,
+html.dark .border-\[\#E2EAF3\],
+html.dark .border-\[\#E6EEF5\],
+html.dark .border-\[\#E7EEF6\],
+html.dark .border-\[\#E8EEF5\],
+html.dark .border-\[\#EEF2F6\],
+html.dark .border-\[\#EEF3F8\],
+html.dark .border-\[\#F1F5F9\],
+html.dark .border-\[\#F8FAFC\],
+html.dark .hover\:border-blue-100:hover,
+html.dark .hover\:border-blue-200:hover {
+  border-color: #31445f;
+}
+
+html.dark .border-\[\#bfdbfe\],
+html.dark .border-\[\#8ec0ff\],
+html.dark .border-\[\#93C5FD\],
+html.dark .border-\[\#93c5fd\],
+html.dark .border-\[\#d7e8ff\],
+html.dark .border-\[\#3b82f6\],
+html.dark .ring-\[\#8ec0ff\],
+html.dark .ring-\[\#d5e6fb\] {
+  border-color: #3d6eae;
+}
+
+html.dark .ring-\[\#8ec0ff\],
+html.dark .ring-\[\#d5e6fb\] {
+  --tw-ring-color: #3d6eae;
+}
+
+html.dark .border-emerald-200,
+html.dark .border-\[\#BBF7D0\] {
+  border-color: #1f6b45;
+}
+
+html.dark .border-amber-200 {
+  border-color: #6b4e16;
+}
+
+html.dark .border-red-200,
+html.dark .border-rose-200,
+html.dark .border-\[\#FECACA\] {
+  border-color: #7f1d2d;
+}
+
+html.dark .ring-slate-200,
+html.dark .ring-white {
+  --tw-ring-color: #31445f;
+}
+
+html.dark .ring-blue-100,
+html.dark .focus\:ring-blue-100:focus,
+html.dark .focus\:ring-indigo-100:focus,
+html.dark .focus\:ring-\[\#DBEAFE\]:focus,
+html.dark .focus\:ring-\[\#3b82f6\]\/15:focus {
+  --tw-ring-color: rgb(59 130 246 / 0.35);
+}
+
+html.dark .focus\:border-\[\#3b82f6\]:focus,
+html.dark .focus\:border-\[\#93C5FD\]:focus {
+  border-color: #60a5fa;
+}
+
+/* Text */
+html.dark .text-slate-900,
+html.dark .text-slate-800,
+html.dark .text-\[\#1E293B\],
+html.dark .text-\[\#0c2d6b\],
+html.dark .text-\[\#10284f\],
+html.dark .text-\[\#12356b\] {
+  color: #e8eef7;
+}
+
+html.dark .text-slate-700,
+html.dark .hover\:text-slate-800:hover,
+html.dark .hover\:text-slate-700:hover {
+  color: #d3dce8;
+}
+
+html.dark .text-slate-600,
+html.dark .hover\:text-slate-600:hover,
+html.dark .text-\[\#3d6294\] {
+  color: #b7c3d4;
+}
+
+html.dark .text-slate-500,
+html.dark .text-slate-400,
+html.dark .text-slate-200 {
+  color: #93a2b8;
+}
+
+html.dark .text-slate-300,
+html.dark .disabled\:text-slate-300:disabled,
+html.dark .disabled\:text-slate-400:disabled,
+html.dark .disabled\:text-slate-500:disabled {
+  color: #52637a;
+}
+
+html.dark .placeholder\:text-slate-400::placeholder {
+  color: #7f90a8;
+}
+
+html.dark .text-\[\#2f6fed\],
+html.dark .text-\[\#2F7CF6\],
+html.dark .text-\[\#2f6bff\],
+html.dark .text-\[\#2563eb\],
+html.dark .text-\[\#2563EB\],
+html.dark .text-\[\#3b82f6\],
+html.dark .text-\[\#1D4ED8\],
+html.dark .text-\[\#3b6fd8\],
+html.dark .text-\[\#3B82F6\],
+html.dark .text-blue-600,
+html.dark .text-blue-700,
+html.dark .text-sky-600,
+html.dark .text-sky-700,
+html.dark .hover\:text-\[\#1d4ed8\]:hover,
+html.dark .hover\:text-\[\#2563eb\]:hover,
+html.dark .hover\:text-\[\#2f6fed\]:hover,
+html.dark .hover\:text-\[\#3B82F6\]:hover {
+  color: #93c5fd;
+}
+
+html.dark .text-\[\#1f9a57\],
+html.dark .text-\[\#1f9d55\],
+html.dark .text-\[\#047857\],
+html.dark .text-\[\#15803D\],
+html.dark .text-\[\#16A34A\],
+html.dark .text-\[\#178A52\],
+html.dark .text-\[\#22A06B\],
+html.dark .text-emerald-500,
+html.dark .text-emerald-600,
+html.dark .text-emerald-700,
+html.dark .text-emerald-800,
+html.dark .text-green-700,
+html.dark .hover\:text-emerald-600:hover {
+  color: #6ee7b7;
+}
+
+html.dark .text-\[\#e39b2b\],
+html.dark .text-\[\#D97706\],
+html.dark .text-\[\#d97706\],
+html.dark .text-\[\#C2410C\],
+html.dark .text-\[\#F59E0B\],
+html.dark .text-\[\#F5A524\],
+html.dark .text-amber-600,
+html.dark .text-amber-700,
+html.dark .text-amber-800 {
+  color: #fbbf24;
+}
+
+html.dark .text-\[\#e11d48\],
+html.dark .text-\[\#E11D48\],
+html.dark .text-red-600,
+html.dark .text-red-700,
+html.dark .text-rose-400,
+html.dark .text-rose-500,
+html.dark .text-rose-600,
+html.dark .hover\:text-rose-500:hover,
+html.dark .hover\:text-rose-600:hover {
+  color: #fda4af;
+}
+
+html.dark .text-\[\#7a4fd0\],
+html.dark .text-\[\#6D28D9\],
+html.dark .text-\[\#7C3AED\],
+html.dark .text-\[\#8B5CF6\],
+html.dark .text-\[\#DB2777\] {
+  color: #d8b4fe;
+}
+
+html.dark .text-\[\#0E7490\] {
+  color: #67e8f9;
+}

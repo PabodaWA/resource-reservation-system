@@ -9,6 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { useRouter } from "next/navigation";
+import ThemeToggle from "@/components/theme-toggle";
 import { jobPositionLabel, type JobPosition } from "@/lib/job-position";
 import {
   RESOURCE_CATALOG,
@@ -950,6 +951,7 @@ export default function DashboardClient({
                 )}
               </div>
 
+              <ThemeToggle />
               <button
                 type="button"
                 onClick={() => openSection("notifications")}
