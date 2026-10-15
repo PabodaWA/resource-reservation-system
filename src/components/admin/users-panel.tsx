@@ -287,14 +287,14 @@ export function UsersPanel({
                             aria-label={
                               user.isActive
                                 ? `Deactivate ${user.name}`
-                                : `${user.name} is already inactive`
+                                : `Permanently delete ${user.name}`
                             }
                             title={
                               user.isActive
                                 ? "Deactivate account"
-                                : "Already inactive"
+                                : "Permanently delete inactive account"
                             }
-                            disabled={deletingUserId !== null || !user.isActive}
+                            disabled={deletingUserId !== null}
                             onClick={() => onDelete(user)}
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#FECACA] text-rose-400 hover:bg-rose-50 hover:text-rose-600 disabled:opacity-60"
                           >

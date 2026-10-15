@@ -707,13 +707,11 @@ export default function AdminDashboardClient({
       return;
     }
 
-    if (!user.isActive) {
-      setError(`${user.name} is already inactive.`);
-      return;
-    }
-
+    const permanentlyDelete = !user.isActive;
     const confirmed = window.confirm(
-      `Deactivate ${user.name}? They will not be able to sign in until an administrator activates the account again. Existing reservations stay in place.`
+      permanentlyDelete
+        ? `Permanently delete ${user.name}? This cannot be undone. Users with existing reservations cannot be deleted.`
+        : `Deactivate ${user.name}? They will not be able to sign in until an administrator activates the account again. Existing reservations stay in place.`
     );
 
     if (!confirmed) {
@@ -723,9 +721,12 @@ export default function AdminDashboardClient({
     setDeletingUserId(user.id);
 
     try {
-      const response = await fetch(`/api/users/${user.id}`, {
+      const response = await fetch(
+        `/api/users/${user.id}${permanentlyDelete ? "?permanent=true" : ""}`,
+        {
         method: "DELETE",
-      });
+        }
+      );
 
       const payload: { message?: string } = await response.json();
 
@@ -733,7 +734,11 @@ export default function AdminDashboardClient({
         throw new Error(payload.message || "Unable to deactivate this account.");
       }
 
-      setSuccess(`${user.name} is now inactive.`);
+      setSuccess(
+        permanentlyDelete
+          ? `${user.name} was permanently deleted.`
+          : `${user.name} is now inactive.`
+      );
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");

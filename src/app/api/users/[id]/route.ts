@@ -177,7 +177,7 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   try {
@@ -191,6 +191,7 @@ export async function DELETE(
     }
 
     const { id } = await params;
+    const permanentlyDelete = new URL(request.url).searchParams.get("permanent") === "true";
 
     if (!id || id.length > 64) {
       return NextResponse.json(
@@ -216,6 +217,38 @@ export async function DELETE(
         { message: "User not found." },
         { status: 404 }
       );
+    }
+
+    if (permanentlyDelete) {
+      if (user.isActive) {
+        return NextResponse.json(
+          { message: "Deactivate the account before deleting it permanently." },
+          { status: 400 }
+        );
+      }
+
+      if (user.role === "ADMIN") {
+        const adminCount = await prisma.user.count({ where: { role: "ADMIN" } });
+        if (adminCount <= 1) {
+          return NextResponse.json(
+            { message: "The last administrator cannot be deleted." },
+            { status: 400 }
+          );
+        }
+      }
+
+      const reservationCount = await prisma.reservation.count({
+        where: { userId: user.id },
+      });
+      if (reservationCount > 0) {
+        return NextResponse.json(
+          { message: "This user has reservations and cannot be permanently deleted." },
+          { status: 409 }
+        );
+      }
+
+      await prisma.user.delete({ where: { id: user.id } });
+      return NextResponse.json({ message: "Inactive account permanently deleted." });
     }
 
     if (!user.isActive) {
@@ -263,6 +296,16 @@ export async function DELETE(
       return NextResponse.json(
         { message: "User not found." },
         { status: 404 }
+      );
+    }
+
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2003"
+    ) {
+      return NextResponse.json(
+        { message: "This user has related records and cannot be permanently deleted." },
+        { status: 409 }
       );
     }
 
