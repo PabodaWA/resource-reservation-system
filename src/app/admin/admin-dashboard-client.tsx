@@ -8,6 +8,7 @@ import {
   jobPositionLabel,
   type JobPosition,
 } from "@/lib/job-position";
+import { MAX_RESOURCE_IMAGES } from "@/lib/resource-images";
 
 export type AdminDashboardData = {
   admin: {
@@ -31,6 +32,7 @@ export type AdminDashboardData = {
     location: string;
     capacity: number;
     description: string | null;
+    images: string[];
     status: "ACTIVE" | "INACTIVE";
     createdAt: string;
     updatedAt: string;
@@ -184,6 +186,7 @@ const emptyResource = {
   location: "",
   capacity: "1",
   description: "",
+  images: [] as string[],
   status: "ACTIVE" as "ACTIVE" | "INACTIVE",
 };
 
@@ -878,6 +881,11 @@ export default function AdminDashboardClient({
       return;
     }
 
+    if (resourceForm.images.length > MAX_RESOURCE_IMAGES) {
+      setError(`Add up to ${MAX_RESOURCE_IMAGES} photos.`);
+      return;
+    }
+
     setSavingResource(true);
 
     try {
@@ -890,6 +898,7 @@ export default function AdminDashboardClient({
           location,
           capacity,
           description: description || null,
+          images: resourceForm.images,
         }),
       });
 
@@ -918,6 +927,7 @@ export default function AdminDashboardClient({
       location: resource.location,
       capacity: String(resource.capacity),
       description: resource.description ?? "",
+      images: resource.images,
       status: resource.status,
     });
   }
@@ -982,6 +992,11 @@ export default function AdminDashboardClient({
       return;
     }
 
+    if (resourceForm.images.length > MAX_RESOURCE_IMAGES) {
+      setError(`Add up to ${MAX_RESOURCE_IMAGES} photos.`);
+      return;
+    }
+
     setSavingResource(true);
 
     try {
@@ -994,6 +1009,7 @@ export default function AdminDashboardClient({
           location,
           capacity,
           description: description || null,
+          images: resourceForm.images,
           status: resourceForm.status,
         }),
       });
@@ -2699,6 +2715,48 @@ function ResourcesPanel({
   );
 }
 
+async function readResourceImage(file: File) {
+  if (
+    file.type !== "image/jpeg" &&
+    file.type !== "image/png" &&
+    file.type !== "image/webp"
+  ) {
+    throw new Error("Choose a JPEG, PNG, or WebP photo.");
+  }
+
+  const bitmap = await createImageBitmap(file);
+  const maxSide = 1280;
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    bitmap.close();
+    throw new Error("Could not read that photo.");
+  }
+
+  context.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close();
+
+  let quality = 0.82;
+  let dataUrl = canvas.toDataURL("image/jpeg", quality);
+
+  while (dataUrl.length > 550_000 && quality > 0.45) {
+    quality -= 0.08;
+    dataUrl = canvas.toDataURL("image/jpeg", Number(quality.toFixed(2)));
+  }
+
+  if (dataUrl.length > 700_000) {
+    throw new Error("That photo is still too large. Try a smaller image.");
+  }
+
+  return dataUrl;
+}
+
 function ResourceDialog({
   mode,
   form,
@@ -2726,6 +2784,46 @@ function ResourceDialog({
         ...resourceTypes,
         { value: form.type, label: labelType(form.type) },
       ];
+  const [photoError, setPhotoError] = useState("");
+  const [readingPhotos, setReadingPhotos] = useState(false);
+
+  async function addPhotos(files: FileList | null) {
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    const room = MAX_RESOURCE_IMAGES - form.images.length;
+
+    if (room <= 0) {
+      setPhotoError(`You can add up to ${MAX_RESOURCE_IMAGES} photos.`);
+      return;
+    }
+
+    setPhotoError("");
+    setReadingPhotos(true);
+
+    try {
+      const next = [...form.images];
+
+      for (const file of Array.from(files).slice(0, room)) {
+        next.push(await readResourceImage(file));
+      }
+
+      if (files.length > room) {
+        setPhotoError(
+          `Only ${MAX_RESOURCE_IMAGES} photos can be saved. Extra files were skipped.`
+        );
+      }
+
+      onChange({ ...form, images: next });
+    } catch (err) {
+      setPhotoError(
+        err instanceof Error ? err.message : "Could not read that photo."
+      );
+    } finally {
+      setReadingPhotos(false);
+    }
+  }
 
   if (mode === "view" && resource) {
     const category = usageCategory(resource.type);
@@ -2776,6 +2874,25 @@ function ResourceDialog({
                 <dd className="mt-1 text-slate-700">{resource.description}</dd>
               </div>
             )}
+            <div>
+              <dt className="text-slate-400">Photos</dt>
+              {resource.images.length === 0 ? (
+                <dd className="mt-1 text-slate-500">
+                  No photos yet. Edit this resource to add them.
+                </dd>
+              ) : (
+                <dd className="mt-2 grid grid-cols-2 gap-2">
+                  {resource.images.map((photo, index) => (
+                    <img
+                      key={`${index}-${photo.slice(0, 32)}`}
+                      src={photo}
+                      alt=""
+                      className="h-24 w-full rounded-lg object-cover"
+                    />
+                  ))}
+                </dd>
+              )}
+            </div>
           </dl>
           <div className="mt-6 flex justify-end gap-2">
             <button
@@ -2914,6 +3031,67 @@ function ResourceDialog({
             placeholder="Optional details members should know"
           />
         </label>
+
+        <div className="mt-4">
+          <p className="text-sm font-medium text-slate-700">Photos</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">
+            Up to {MAX_RESOURCE_IMAGES} photos. These are saved with the
+            resource and shown on the member dashboard.
+          </p>
+          {form.images.length > 0 && (
+            <ul className="mt-3 grid grid-cols-2 gap-2">
+              {form.images.map((photo, index) => (
+                <li
+                  key={`${index}-${photo.slice(0, 32)}`}
+                  className="overflow-hidden rounded-xl border border-[#E2EAF3]"
+                >
+                  <img
+                    src={photo}
+                    alt=""
+                    className="h-24 w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onChange({
+                        ...form,
+                        images: form.images.filter(
+                          (_, photoIndex) => photoIndex !== index
+                        ),
+                      })
+                    }
+                    className="w-full px-2 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50 hover:text-rose-600"
+                  >
+                    Remove
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <label className="mt-3 flex cursor-pointer items-center justify-center rounded-xl border border-dashed border-[#93C5FD] bg-[#F8FBFF] px-4 py-3 text-sm font-semibold text-[#2563EB] hover:bg-[#EFF6FF]">
+            {readingPhotos
+              ? "Reading photos..."
+              : form.images.length >= MAX_RESOURCE_IMAGES
+                ? "Photo limit reached"
+                : "Add photos"}
+            <input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              multiple
+              disabled={
+                readingPhotos || form.images.length >= MAX_RESOURCE_IMAGES
+              }
+              className="sr-only"
+              onChange={(event) => {
+                void addPhotos(event.target.files);
+                event.target.value = "";
+              }}
+            />
+          </label>
+          {photoError && (
+            <p className="mt-2 text-sm text-rose-600">{photoError}</p>
+          )}
+        </div>
 
         <div className="mt-6 flex justify-end gap-2">
           <button

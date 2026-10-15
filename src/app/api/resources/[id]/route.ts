@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
+import { parseResourceImages } from "@/lib/resource-images";
 import { requireAdmin } from "@/lib/require-auth";
 
 export async function PATCH(
@@ -95,6 +96,16 @@ export async function PATCH(
       );
     }
 
+    const parsedImages =
+      "images" in body ? parseResourceImages(body.images) : null;
+
+    if (parsedImages && !parsedImages.ok) {
+      return NextResponse.json(
+        { message: parsedImages.message },
+        { status: 400 }
+      );
+    }
+
     const resource = await prisma.resource.update({
       where: { id },
       data: {
@@ -107,6 +118,7 @@ export async function PATCH(
           typeof description === "string" && description.trim()
             ? description.trim()
             : null,
+        ...(parsedImages?.ok ? { images: parsedImages.images } : {}),
       },
       select: {
         id: true,

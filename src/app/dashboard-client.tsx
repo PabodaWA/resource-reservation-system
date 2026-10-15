@@ -31,6 +31,7 @@ export type UserDashboardData = {
     location: string;
     capacity: number;
     description: string | null;
+    images: string[];
     upcomingBookings: number;
   }[];
   reservations: {
@@ -1149,6 +1150,9 @@ export default function DashboardClient({
                                   type: reservation.resourceType,
                                   name: reservation.resourceName,
                                   location: reservation.resourceLocation,
+                                  images: data.resources.find(
+                                    (item) => item.id === reservation.resourceId
+                                  )?.images,
                                 }}
                                 className="h-16 w-24 rounded-xl"
                               />
@@ -2105,7 +2109,7 @@ function ResourceDetailView({
               <div className="flex gap-2 p-3">
                 {photos.map((photo, index) => (
                   <button
-                    key={photo}
+                    key={`${index}-${photo.slice(0, 48)}`}
                     type="button"
                     onClick={() => onPhoto(index)}
                     aria-label={`Show photo ${index + 1}`}
@@ -2681,7 +2685,18 @@ function formatHourDuration(ms: number) {
   return formatDuration(ms);
 }
 
-function resourceGallery(resource: { type: string; name: string; location: string }) {
+function resourceGallery(resource: {
+  type: string;
+  name: string;
+  location: string;
+  images?: string[];
+}) {
+  const saved = savedResourcePhotos(resource);
+
+  if (saved.length > 0) {
+    return saved;
+  }
+
   const primary = resourcePhoto(resource);
   const pool = resourcePhotos[visualKind(resource).id];
   return [primary, ...pool.filter((photo) => photo !== primary)].slice(0, 4);
@@ -3011,7 +3026,12 @@ function ResourcePhoto({
   resource,
   className,
 }: {
-  resource: { type: string; name: string; location: string };
+  resource: {
+    type: string;
+    name: string;
+    location: string;
+    images?: string[];
+  };
   className?: string;
 }) {
   const [failed, setFailed] = useState(false);
@@ -3713,6 +3733,7 @@ function ReservationRow({
             type: reservation.resourceType,
             name: reservation.resourceName,
             location: reservation.resourceLocation,
+            images: resource?.images,
           }}
           className="h-36 w-full rounded-xl lg:h-32 lg:w-44"
         />
@@ -4720,7 +4741,22 @@ const resourcePhotos: Record<VisualKind, string[]> = {
   ],
 };
 
-function resourcePhoto(resource: { type: string; name: string; location: string }) {
+function savedResourcePhotos(resource: { images?: string[] }) {
+  return (resource.images ?? []).filter((photo) => photo.trim()).slice(0, 4);
+}
+
+function resourcePhoto(resource: {
+  type: string;
+  name: string;
+  location: string;
+  images?: string[];
+}) {
+  const saved = savedResourcePhotos(resource);
+
+  if (saved.length > 0) {
+    return saved[0];
+  }
+
   const blob = `${resource.type} ${resource.name}`.toLowerCase();
 
   if (blob.includes("whiteboard") || blob.includes("board")) {

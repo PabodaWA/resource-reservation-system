@@ -1,6 +1,7 @@
 
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { parseResourceImages } from "@/lib/resource-images";
 import { requireAdmin, requireAuth } from "@/lib/require-auth";
 
 export async function GET() {
@@ -93,6 +94,16 @@ export async function POST(request: Request) {
       );
     }
 
+    const images = "images" in body ? body.images : [];
+    const parsedImages = parseResourceImages(images);
+
+    if (!parsedImages.ok) {
+      return NextResponse.json(
+        { message: parsedImages.message },
+        { status: 400 }
+      );
+    }
+
     const resource = await prisma.resource.create({
       data: {
         name: body.name.trim(),
@@ -103,6 +114,7 @@ export async function POST(request: Request) {
           typeof description === "string" && description.trim()
             ? description.trim()
             : null,
+        images: parsedImages.images,
       },
     });
 

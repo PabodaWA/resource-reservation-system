@@ -60,6 +60,7 @@ model Resource {
   location     String
   capacity     Int           @default(1)
   description  String?
+  images       String[]       @default([])
   status       ResourceStatus @default(ACTIVE)
   reservations Reservation[]
   createdAt    DateTime      @default(now())

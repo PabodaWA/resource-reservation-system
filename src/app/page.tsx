@@ -63,6 +63,7 @@ async function ProtectedDashboard() {
         location: true,
         capacity: true,
         description: true,
+        images: true,
       },
     }),
     prisma.reservation.findMany({
@@ -134,6 +135,7 @@ async function ProtectedDashboard() {
       location: resource.location,
       capacity: resource.capacity,
       description: resource.description,
+      images: resource.images,
       upcomingBookings: upcomingByResource.get(resource.id) ?? 0,
     })),
     reservations: reservations.map((reservation) => ({
