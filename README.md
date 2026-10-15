@@ -132,6 +132,8 @@ Forgot password on the login page emails a one-time code when SMTP is configured
 
 One user has many reservations. One resource has many reservations. One reservation has many participants.
 
+The ER diagram is available in [docs/er-diagram.md](docs/er-diagram.md). The short walkthrough in [docs/demo-script.md](docs/demo-script.md) can be used to record the required 3-5 minute demonstration.
+
 ## Project layout
 
 ```text
@@ -139,8 +141,11 @@ prisma/schema.prisma          Database models
 prisma/migrations/            SQL migrations
 prisma7.config.ts             Prisma CLI config
 scripts/create-admin.ts       Creates the first administrator
-src/app/page.tsx              Member dashboard
-src/app/admin/page.tsx        Admin dashboard
+src/app/page.tsx              Member dashboard page
+src/app/dashboard-client.tsx  Member screen state
+src/components/member/        Browse, booking, schedule, and reservation views
+src/app/admin/page.tsx        Admin dashboard page
+src/components/admin/         Users, resources, reservations, and reports
 src/app/login/page.tsx        Sign in and password reset
 src/app/api/                  Auth, users, resources, and reservations
 src/lib/                      Booking rules, auth, and mail
