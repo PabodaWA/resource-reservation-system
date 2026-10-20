@@ -18,6 +18,9 @@ export async function GET() {
     }
 
     const resources = await prisma.resource.findMany({
+      where: {
+        status: "ACTIVE",
+      },
       orderBy: {
         createdAt: "desc",
       },

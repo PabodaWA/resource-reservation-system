@@ -39,6 +39,9 @@ export default function AdminDashboardClient({
   const [reservationSort, setReservationSort] = useState<
     "newest" | "oldest" | "start"
   >("newest");
+  const [pendingSort, setPendingSort] = useState<
+    "start" | "newest" | "oldest" | "requester" | "resource"
+  >("start");
   const [reservationPage, setReservationPage] = useState(1);
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1638,6 +1641,8 @@ export default function AdminDashboardClient({
                 reviewingId={reviewingId}
                 deletingId={deletingReservationId}
                 onSearch={setPendingSearch}
+                sort={pendingSort}
+                onSort={setPendingSort}
                 onReview={(id, status, declineReason) =>
                   void handleReview(id, status, declineReason)
                 }

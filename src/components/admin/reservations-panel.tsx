@@ -480,18 +480,24 @@ export function PendingRequests({
   requests,
   adminId,
   search,
+  sort,
   reviewingId,
   deletingId,
   onSearch,
+  onSort,
   onReview,
   onDelete,
 }: {
   requests: AdminDashboardData["reservations"];
   adminId: string;
   search: string;
+  sort: "start" | "newest" | "oldest" | "requester" | "resource";
   reviewingId: string;
   deletingId: string;
   onSearch: (value: string) => void;
+  onSort: (
+    value: "start" | "newest" | "oldest" | "requester" | "resource"
+  ) => void;
   onReview: (
     id: string,
     status: "CONFIRMED" | "CANCELLED",
@@ -523,10 +529,31 @@ export function PendingRequests({
         )
       );
     })
-    .sort(
-      (a, b) =>
+    .sort((a, b) => {
+      if (sort === "newest") {
+        return (
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      }
+
+      if (sort === "oldest") {
+        return (
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+      }
+
+      if (sort === "requester") {
+        return a.userName.localeCompare(b.userName);
+      }
+
+      if (sort === "resource") {
+        return a.resourceName.localeCompare(b.resourceName);
+      }
+
+      return (
         new Date(a.startTime).getTime() - new Date(b.startTime).getTime()
-    );
+      );
+    });
   const viewed = requests.find((reservation) => reservation.id === viewId);
 
   return (
@@ -541,6 +568,30 @@ export function PendingRequests({
           placeholder="Search by person, resource, or title..."
           className="h-11 w-full rounded-xl border border-[#E2EAF3] bg-white pl-10 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-[#93C5FD] focus:ring-2 focus:ring-[#DBEAFE]"
         />
+      </div>
+      <div className="flex items-center justify-end gap-2 text-sm text-slate-500">
+        <label htmlFor="pending-request-sort">Sort by</label>
+        <select
+          id="pending-request-sort"
+          value={sort}
+          onChange={(event) =>
+            onSort(
+              event.target.value as
+                | "start"
+                | "newest"
+                | "oldest"
+                | "requester"
+                | "resource"
+            )
+          }
+          className="rounded-lg border border-[#E2EAF3] bg-white px-3 py-2 font-semibold text-slate-700 outline-none focus:border-[#93C5FD] focus:ring-2 focus:ring-[#DBEAFE]"
+        >
+          <option value="start">Booking date (soonest)</option>
+          <option value="newest">Request date (newest)</option>
+          <option value="oldest">Request date (oldest)</option>
+          <option value="requester">Requester (A - Z)</option>
+          <option value="resource">Resource (A - Z)</option>
+        </select>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#E8EEF5] bg-white shadow-[0_8px_24px_rgba(15,42,68,0.04)]">

@@ -218,7 +218,7 @@ export function AvailabilityPill({
         : "bg-[#fde8e8] text-[#e11d48]";
   const text = verbose
     ? label === "Limited"
-      ? "Limited Availability"
+      ? "Limited Availability for today"
       : label === "Unavailable"
         ? "Not Available"
         : label
@@ -739,4 +739,3 @@ export function FormField({
     </label>
   );
 }
-
