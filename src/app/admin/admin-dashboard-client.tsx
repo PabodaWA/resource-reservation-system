@@ -445,7 +445,8 @@ export default function AdminDashboardClient({
 
   async function handleReview(
     reservationId: string,
-    status: "CONFIRMED" | "CANCELLED"
+    status: "CONFIRMED" | "CANCELLED",
+    declineReason?: string
   ) {
     setError("");
     setSuccess("");
@@ -455,7 +456,7 @@ export default function AdminDashboardClient({
       const response = await fetch(`/api/reservations/${reservationId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, declineReason }),
       });
       const payload: { message?: string } = await response.json();
 
@@ -1637,7 +1638,9 @@ export default function AdminDashboardClient({
                 reviewingId={reviewingId}
                 deletingId={deletingReservationId}
                 onSearch={setPendingSearch}
-                onReview={(id, status) => void handleReview(id, status)}
+                onReview={(id, status, declineReason) =>
+                  void handleReview(id, status, declineReason)
+                }
                 onDelete={handleDeleteReservation}
               />
             )}
@@ -1682,7 +1685,9 @@ export default function AdminDashboardClient({
                 onShiftWeek={(days) =>
                   setWeekAnchor((current) => addDays(current, days))
                 }
-                onReview={(id, status) => void handleReview(id, status)}
+                onReview={(id, status, declineReason) =>
+                  void handleReview(id, status, declineReason)
+                }
                 onDelete={handleDeleteReservation}
               />
             )}
@@ -2040,4 +2045,3 @@ export default function AdminDashboardClient({
     </div>
   );
 }
-

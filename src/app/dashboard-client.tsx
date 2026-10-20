@@ -1807,6 +1807,7 @@ export default function DashboardClient({
                 }
                 onEdit={
                   viewingReservation
+                    && viewingReservation.isOwner
                     ? () => openPendingEdit(viewingReservation)
                     : undefined
                 }

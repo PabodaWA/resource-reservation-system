@@ -70,7 +70,18 @@ async function ProtectedDashboard() {
       },
     }),
     prisma.reservation.findMany({
-      where: { userId: user.id },
+      where: {
+        OR: [
+          { userId: user.id },
+          {
+            participants: {
+              some: {
+                email: { equals: user.email, mode: "insensitive" },
+              },
+            },
+          },
+        ],
+      },
       orderBy: { startTime: "desc" },
       select: {
         id: true,
@@ -79,6 +90,7 @@ async function ProtectedDashboard() {
         startTime: true,
         endTime: true,
         status: true,
+        userId: true,
         createdAt: true,
         updatedAt: true,
         resourceId: true,
@@ -152,6 +164,7 @@ async function ProtectedDashboard() {
       startTime: reservation.startTime.toISOString(),
       endTime: reservation.endTime.toISOString(),
       status: reservation.status,
+      isOwner: reservation.userId === user.id,
       createdAt: reservation.createdAt.toISOString(),
       updatedAt: reservation.updatedAt.toISOString(),
       timing: timingOf(reservation.startTime, reservation.endTime, now),

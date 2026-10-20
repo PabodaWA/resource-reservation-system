@@ -29,6 +29,7 @@ export type UserDashboardData = {
     startTime: string;
     endTime: string;
     status: "CONFIRMED" | "PENDING" | "CANCELLED";
+    isOwner: boolean;
     createdAt: string;
     updatedAt: string;
     timing: "upcoming" | "in_progress" | "past";

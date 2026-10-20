@@ -1,3 +1,5 @@
+import type { Transporter } from "nodemailer";
+
 type TemporaryPasswordEmail = {
   to: string;
   name: string;
@@ -45,6 +47,44 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+type MailTransport = {
+  from: string;
+  transporter: Transporter;
+};
+
+let cachedMailTransport: MailTransport | null = null;
+let cachedMailTransportKey = "";
+
+function isTransientMailError(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) {
+    return false;
+  }
+
+  return (
+    typeof error.code === "string" &&
+    ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "ESOCKET"].includes(error.code)
+  );
+}
+
+async function sendMailWithRetry(
+  transporter: Transporter,
+  message: Parameters<Transporter["sendMail"]>[0]
+) {
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await transporter.sendMail(message);
+    } catch (error) {
+      if (attempt === 2 || !isTransientMailError(error)) {
+        throw error;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  throw new Error("Email could not be sent.");
+}
+
 async function createTransporter() {
   const host = readEnv("SMTP_HOST");
   const user = readEnv("SMTP_USER");
@@ -60,20 +100,32 @@ async function createTransporter() {
     throw new Error("SMTP_PORT is invalid.");
   }
 
+  const transportKey = `${host}\0${port}\0${user}\0${pass}\0${from}`;
+  if (cachedMailTransport && cachedMailTransportKey === transportKey) {
+    return cachedMailTransport;
+  }
+
   // Loaded here so this file stays a synchronous module. A top-level
   // nodemailer import makes Turbopack evaluate it asynchronously and the
   // participant notice export is then missing at call time.
   const { default: nodemailer } = await import("nodemailer");
 
-  return {
+  cachedMailTransport = {
     from,
     transporter: nodemailer.createTransport({
       host,
       port,
       secure: port === 465,
+      requireTLS: port === 587,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 20000,
       auth: { user, pass },
     }),
   };
+
+  cachedMailTransportKey = transportKey;
+  return cachedMailTransport;
 }
 
 type ParticipantNoticeEmail = {
@@ -99,7 +151,7 @@ export async function sendParticipantNotice(
   const safeWhen = escapeHtml(input.whenLabel);
   const safeAppUrl = escapeHtml(input.appUrl);
 
-  await transporter.sendMail({
+  await sendMailWithRetry(transporter, {
     from,
     to: input.to,
     subject: `${input.bookerName} included you in a resource booking`,
@@ -139,7 +191,7 @@ export async function sendParticipantCancellation(
   const safeWhen = escapeHtml(input.whenLabel);
   const safeAppUrl = escapeHtml(input.appUrl);
 
-  await transporter.sendMail({
+  await sendMailWithRetry(transporter, {
     from,
     to: input.to,
     subject: `A booking you were included in was cancelled`,
@@ -176,6 +228,7 @@ type BookerReservationEmail = {
   whenLabel: string;
   appUrl: string;
   outcome: "confirmed" | "pending" | "cancelled" | "declined";
+  declineReason?: string;
 };
 
 export async function emailBooker(
@@ -183,9 +236,11 @@ export async function emailBooker(
   input: Omit<BookerReservationEmail, "appUrl"> & { sentToActor: boolean }
 ): Promise<string> {
   const noun =
-    input.outcome === "cancelled" || input.outcome === "declined"
-      ? "cancellation"
-      : "confirmation";
+    input.outcome === "declined"
+      ? "decline"
+      : input.outcome === "cancelled"
+        ? "cancellation"
+        : "confirmation";
 
   if (!isMailConfigured()) {
     return input.sentToActor
@@ -202,6 +257,7 @@ export async function emailBooker(
       title: input.title,
       whenLabel: input.whenLabel,
       outcome: input.outcome,
+      declineReason: input.declineReason,
       appUrl: appUrlFrom(request),
     });
   } catch (error) {
@@ -226,6 +282,9 @@ export async function sendBookerReservationEmail(
   const safeTitle = escapeHtml(input.title);
   const safeWhen = escapeHtml(input.whenLabel);
   const safeAppUrl = escapeHtml(input.appUrl);
+  const safeDeclineReason = input.declineReason
+    ? escapeHtml(input.declineReason)
+    : "";
   const copy =
     input.outcome === "pending"
       ? {
@@ -242,8 +301,8 @@ export async function sendBookerReservationEmail(
         : input.outcome === "declined"
           ? {
               subject: "Your resource booking request was declined",
-              lead: `Your booking request for ${input.resourceName} was declined.`,
-              safeLead: `Your booking request for <strong>${safeResource}</strong> was declined.`,
+              lead: `Your booking request for ${input.resourceName} was declined.${input.declineReason ? ` Reason: ${input.declineReason}` : ""}`,
+              safeLead: `Your booking request for <strong>${safeResource}</strong> was declined.${input.declineReason ? ` Reason: ${safeDeclineReason}` : ""}`,
             }
           : {
               subject: "Your resource booking is confirmed",
@@ -251,7 +310,7 @@ export async function sendBookerReservationEmail(
               safeLead: `Your booking for <strong>${safeResource}</strong> is confirmed.`,
             };
 
-  await transporter.sendMail({
+  await sendMailWithRetry(transporter, {
     from,
     to: input.to,
     subject: copy.subject,
@@ -289,7 +348,7 @@ export async function sendTemporaryPasswordEmail(
   const safePassword = escapeHtml(input.temporaryPassword);
   const safeLoginUrl = escapeHtml(input.loginUrl);
 
-  await transporter.sendMail({
+  await sendMailWithRetry(transporter, {
     from,
     to: input.to,
     subject: "Your Ruhunu ResourceHub temporary password",

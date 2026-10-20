@@ -23,9 +23,13 @@ export function ReservationRow({
   onView: () => void;
 }) {
   const canCancel =
+    reservation.isOwner &&
     (reservation.status === "CONFIRMED" || reservation.status === "PENDING") &&
     reservation.timing !== "past";
-  const canEdit = reservation.status === "PENDING" && reservation.timing !== "past";
+  const canEdit =
+    reservation.isOwner &&
+    reservation.status === "PENDING" &&
+    reservation.timing !== "past";
   const schedule = reservationSchedule(reservation.startTime, reservation.endTime);
   const facilities = resource ? resourceFacilities(resource) : "";
   const category = resource
@@ -443,4 +447,3 @@ export function PendingEditDialog({
     </div>
   );
 }
-

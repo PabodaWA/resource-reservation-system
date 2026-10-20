@@ -41,6 +41,155 @@ class ReservationEditError extends Error {
   }
 }
 
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const auth = await requireAdmin();
+
+    if (!auth.ok) {
+      return NextResponse.json(
+        { message: auth.message },
+        { status: auth.status }
+      );
+    }
+
+    const { id } = await params;
+
+    if (!id || id.length > 64) {
+      return NextResponse.json(
+        { message: "A valid reservation is required." },
+        { status: 400 }
+      );
+    }
+
+    const reservation = await prisma.reservation.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+        startTime: true,
+        endTime: true,
+        resourceId: true,
+        user: { select: { name: true, email: true } },
+        resource: { select: { name: true, category: true, status: true } },
+        participants: { select: { name: true, email: true } },
+      },
+    });
+
+    if (!reservation) {
+      return NextResponse.json(
+        { message: "Reservation not found." },
+        { status: 404 }
+      );
+    }
+
+    if (reservation.status !== "PENDING") {
+      return NextResponse.json(
+        { message: "Only a pending request can be checked." },
+        { status: 400 }
+      );
+    }
+
+    const conflicts = await prisma.reservation.findMany({
+      where: {
+        id: { not: reservation.id },
+        status: { in: ["CONFIRMED", "PENDING"] },
+        startTime: { lt: reservation.endTime },
+        endTime: { gt: reservation.startTime },
+        OR: [
+          { resource: { category: "COMPANY_VEHICLES" } },
+          { resourceId: reservation.resourceId },
+          ...(isPersonLocationCategory(reservation.resource.category)
+            ? [
+                {
+                  resource: {
+                    category: {
+                      in: ["MEETING_ROOMS", "SHARED_WORKSPACES"],
+                    },
+                  },
+                },
+              ]
+            : []),
+        ],
+      },
+      select: {
+        resourceId: true,
+        resource: { select: { id: true, category: true, name: true } },
+        user: { select: { name: true, email: true } },
+        participants: { select: { name: true, email: true } },
+      },
+    });
+
+    const resourceConflict = conflicts.some(
+      (conflict) =>
+        isCompanyVehicle(reservation.resource.category)
+          ? conflict.resource.category === "COMPANY_VEHICLES"
+          : conflict.resource.id === reservation.resourceId
+    );
+    const resourceUnavailable =
+      reservation.resource.status !== "ACTIVE" || resourceConflict;
+
+    const peopleEmails = new Set([
+      reservation.user.email.trim().toLowerCase(),
+      ...reservation.participants.map((person) =>
+        person.email.trim().toLowerCase()
+      ),
+    ]);
+    const personConflicts =
+      isPersonLocationCategory(reservation.resource.category)
+        ? conflicts.filter(
+            (conflict) =>
+              conflict.resource.category === "MEETING_ROOMS" ||
+              conflict.resource.category === "SHARED_WORKSPACES"
+          )
+        : [];
+    const unavailablePeople = new Map<string, string>();
+
+    for (const conflict of personConflicts) {
+      for (const person of [
+        conflict.user,
+        ...conflict.participants,
+      ]) {
+        const email = person.email.trim().toLowerCase();
+        if (peopleEmails.has(email)) {
+          unavailablePeople.set(email, person.name);
+        }
+      }
+    }
+
+    const reasons = [
+      ...(reservation.endTime.getTime() <= Date.now()
+        ? ["The requested booking time has already ended."]
+        : []),
+      ...(resourceUnavailable
+        ? [
+            reservation.resource.status !== "ACTIVE"
+              ? "The resource is inactive."
+              : "The resource is already booked for this time.",
+          ]
+        : []),
+      ...(unavailablePeople.size > 0
+        ? [
+            `Unavailable people: ${Array.from(unavailablePeople.values()).join(", ")}.`,
+          ]
+        : []),
+    ];
+
+    return NextResponse.json({
+      available: reasons.length === 0,
+      reasons,
+    });
+  } catch (error) {
+    console.error("Failed to check reservation availability:", error);
+    return NextResponse.json(
+      { message: "Failed to check reservation availability." },
+      { status: 500 }
+    );
+  }
+}
+
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -77,6 +226,13 @@ export async function PATCH(
       (body.status === "CANCELLED" || body.status === "CONFIRMED")
         ? body.status
         : null;
+    const declineReason =
+      typeof body === "object" &&
+      body !== null &&
+      "declineReason" in body &&
+      typeof body.declineReason === "string"
+        ? body.declineReason.trim()
+        : "";
 
     if (!nextStatus) {
       return NextResponse.json(
@@ -126,6 +282,18 @@ export async function PATCH(
     }
 
     if (nextStatus === "CANCELLED") {
+      const declinedByAdmin =
+        reservation?.status === "PENDING" &&
+        auth.user.role === "ADMIN" &&
+        reservation.userId !== auth.user.id;
+
+      if (declinedByAdmin && (!declineReason || declineReason.length > 500)) {
+        return NextResponse.json(
+          { message: "A decline reason is required and must be 500 characters or fewer." },
+          { status: 400 }
+        );
+      }
+
       if (reservation.status === "CANCELLED") {
         return NextResponse.json(
           { message: "This reservation is already cancelled." },
@@ -151,11 +319,6 @@ export async function PATCH(
         where: { id: reservation.id },
         data: { status: "CANCELLED" },
       });
-
-      const declinedByAdmin =
-        reservation.status === "PENDING" &&
-        auth.user.role === "ADMIN" &&
-        reservation.userId !== auth.user.id;
 
       let message = declinedByAdmin
         ? "The approval request was declined."
@@ -191,6 +354,7 @@ export async function PATCH(
         title: reservation.title,
         whenLabel,
         outcome: declinedByAdmin ? "declined" : "cancelled",
+        declineReason: declinedByAdmin ? declineReason : undefined,
         sentToActor: reservation.user.email === auth.user.email,
       });
 
@@ -280,13 +444,24 @@ export async function PATCH(
     }
 
     let message = "Booking approved. It is now confirmed.";
+    const whenLabel = formatBookingWindow(
+      reservation.startTime,
+      reservation.endTime,
+      "Asia/Colombo"
+    );
+
+    message += await emailBooker(request, {
+      to: reservation.user.email,
+      name: reservation.user.name,
+      resourceName: reservation.resource.name,
+      location: reservation.resource.location,
+      title: reservation.title,
+      whenLabel,
+      outcome: "confirmed",
+      sentToActor: reservation.user.email === auth.user.email,
+    });
 
     if (reservation.participants.length > 0 && isMailConfigured()) {
-      const whenLabel = formatBookingWindow(
-        reservation.startTime,
-        reservation.endTime,
-        "Asia/Colombo"
-      );
       const results = await Promise.allSettled(
         reservation.participants.map((person) =>
           sendParticipantNotice({
@@ -303,9 +478,17 @@ export async function PATCH(
       );
       const notified = results.filter((result) => result.status === "fulfilled").length;
 
+      for (const result of results) {
+        if (result.status === "rejected") {
+          console.error("Failed to send participant approval email:", result.reason);
+        }
+      }
+
       if (notified !== reservation.participants.length) {
         message += " Some participant emails could not be sent.";
       }
+    } else if (reservation.participants.length > 0) {
+      message += " Participant emails could not be sent.";
     }
 
     return NextResponse.json({ message });

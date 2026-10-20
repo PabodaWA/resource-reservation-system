@@ -53,12 +53,17 @@ export function ReservationsPanel({
   onSort: (value: "newest" | "oldest" | "start") => void;
   onPage: (page: number) => void;
   onShiftWeek: (days: number) => void;
-  onReview: (id: string, status: "CONFIRMED" | "CANCELLED") => void;
+  onReview: (
+    id: string,
+    status: "CONFIRMED" | "CANCELLED",
+    declineReason?: string
+  ) => void;
   onDelete: (
     reservation: AdminDashboardData["reservations"][number]
   ) => Promise<boolean>;
 }) {
   const [viewId, setViewId] = useState<string | null>(null);
+  const [declineReservation, setDeclineReservation] = useState<AdminDashboardData["reservations"][number] | null>(null);
   const previousStart = addDays(weekStart, -7);
   const total = reservations.length;
   const pending = reservations.filter((item) => item.status === "PENDING").length;
@@ -377,9 +382,7 @@ export function ReservationsPanel({
                                 reviewingId === reservation.id ||
                                 deletingId === reservation.id
                               }
-                              onClick={() =>
-                                onReview(reservation.id, "CANCELLED")
-                              }
+                              onClick={() => setDeclineReservation(reservation)}
                             >
                               <CancelIcon />
                             </IconAction>
@@ -458,6 +461,17 @@ export function ReservationsPanel({
           onDelete={onDelete}
         />
       )}
+      {declineReservation && (
+        <DeclineReasonDialog
+          reservation={declineReservation}
+          busy={reviewingId === declineReservation.id}
+          onClose={() => setDeclineReservation(null)}
+          onSubmit={(reason) => {
+            onReview(declineReservation.id, "CANCELLED", reason);
+            setDeclineReservation(null);
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -478,12 +492,17 @@ export function PendingRequests({
   reviewingId: string;
   deletingId: string;
   onSearch: (value: string) => void;
-  onReview: (id: string, status: "CONFIRMED" | "CANCELLED") => void;
+  onReview: (
+    id: string,
+    status: "CONFIRMED" | "CANCELLED",
+    declineReason?: string
+  ) => void;
   onDelete: (
     reservation: AdminDashboardData["reservations"][number]
   ) => Promise<boolean>;
 }) {
   const [viewId, setViewId] = useState<string | null>(null);
+  const [declineReservation, setDeclineReservation] = useState<AdminDashboardData["reservations"][number] | null>(null);
   const term = search.trim().toLowerCase();
   const rows = requests
     .filter((reservation) => {
@@ -532,7 +551,7 @@ export function PendingRequests({
           />
         ) : (
           <div className="min-h-0 flex-1 overflow-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[860px] text-left text-sm">
               <thead className="sticky top-0 bg-white">
                 <tr className="border-b border-[#F1F5F9] text-xs text-slate-400">
                   <th className="px-4 py-3 font-medium">User</th>
@@ -590,7 +609,7 @@ export function PendingRequests({
                         <button
                           type="button"
                           disabled={reviewingId === reservation.id}
-                          onClick={() => onReview(reservation.id, "CANCELLED")}
+                          onClick={() => setDeclineReservation(reservation)}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
                         >
                           Decline
@@ -615,7 +634,65 @@ export function PendingRequests({
           onDelete={onDelete}
         />
       )}
+      {declineReservation && (
+        <DeclineReasonDialog
+          reservation={declineReservation}
+          busy={reviewingId === declineReservation.id}
+          onClose={() => setDeclineReservation(null)}
+          onSubmit={(reason) => {
+            onReview(declineReservation.id, "CANCELLED", reason);
+            setDeclineReservation(null);
+          }}
+        />
+      )}
     </section>
+  );
+}
+
+function DeclineReasonDialog({
+  reservation,
+  busy,
+  onClose,
+  onSubmit,
+}: {
+  reservation: AdminDashboardData["reservations"][number];
+  busy: boolean;
+  onClose: () => void;
+  onSubmit: (reason: string) => void;
+}) {
+  const [reason, setReason] = useState("");
+  const trimmedReason = reason.trim();
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+      <form
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="decline-reason-title"
+        onSubmit={(event) => { event.preventDefault(); if (trimmedReason && reason.length <= 500 && !busy) onSubmit(trimmedReason); }}
+        className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl"
+      >
+        <h2 id="decline-reason-title" className="text-lg font-bold text-slate-800">Decline request</h2>
+        <p className="mt-1 text-sm text-slate-500">Add a reason for declining “{reservation.title}”. The requester will receive it by email.</p>
+        <label htmlFor="decline-reason" className="mt-5 block text-sm font-semibold text-slate-700">Reason <span className="text-rose-600">*</span></label>
+        <textarea
+          id="decline-reason"
+          required
+          autoFocus
+          maxLength={500}
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+          rows={4}
+          placeholder="Explain why this request is being declined..."
+          className="mt-2 w-full resize-y rounded-xl border border-[#E2EAF3] px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-[#93C5FD] focus:ring-2 focus:ring-[#DBEAFE]"
+        />
+        <div className="mt-1 flex justify-between text-xs text-slate-400"><span>{trimmedReason ? "" : "Please enter a reason."}</span><span>{reason.length}/500</span></div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button type="button" disabled={busy} onClick={onClose} className="rounded-xl border border-[#E2EAF3] px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60">Keep request pending</button>
+          <button type="submit" disabled={busy || !trimmedReason || reason.length > 500} className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:opacity-50">{busy ? "Declining..." : "Decline request"}</button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -633,7 +710,11 @@ export function BookingDetailsDialog({
   reviewingId: string;
   deletingId: string;
   onClose: () => void;
-  onReview: (id: string, status: "CONFIRMED" | "CANCELLED") => void;
+  onReview: (
+    id: string,
+    status: "CONFIRMED" | "CANCELLED",
+    declineReason?: string
+  ) => void;
   onDelete: (
     reservation: AdminDashboardData["reservations"][number]
   ) => Promise<boolean>;
@@ -647,6 +728,7 @@ export function BookingDetailsDialog({
   const reviewing = reviewingId === reservation.id;
   const deleting = deletingId === reservation.id;
   const busy = reviewing || deleting;
+  const [declineRequested, setDeclineRequested] = useState(false);
   const partySize = 1 + reservation.participants.length;
   const timingLabel = {
     upcoming: "Upcoming",
@@ -666,6 +748,7 @@ export function BookingDetailsDialog({
   }, [onClose]);
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
       onMouseDown={(event) => {
@@ -830,7 +913,7 @@ export function BookingDetailsDialog({
               <button
                 type="button"
                 disabled={busy}
-                onClick={() => onReview(reservation.id, "CANCELLED")}
+                onClick={() => setDeclineRequested(true)}
                 className="rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
               >
                 {reviewing ? "Saving..." : "Decline"}
@@ -848,6 +931,17 @@ export function BookingDetailsDialog({
         </div>
       </div>
     </div>
+    {declineRequested && (
+      <DeclineReasonDialog
+        reservation={reservation}
+        busy={reviewing}
+        onClose={() => setDeclineRequested(false)}
+        onSubmit={(reason) => {
+          onReview(reservation.id, "CANCELLED", reason);
+          setDeclineRequested(false);
+        }}
+      />
+    )}
+    </>
   );
 }
-
