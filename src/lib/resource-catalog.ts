@@ -72,6 +72,7 @@ const MEETING_ROOM_POSITIONS = new Set([
 export const MIN_BOOKING_MS = 15 * 60 * 1000;
 export const STANDARD_MAX_BOOKING_MS = 12 * 60 * 60 * 1000;
 export const VEHICLE_MAX_BOOKING_MS = 36 * 60 * 60 * 1000;
+export const VEHICLE_MIN_LEAD_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function isResourceCategory(value: unknown): value is ResourceCategory {
   return RESOURCE_CATALOG.some((category) => category.value === value);
@@ -144,6 +145,10 @@ export function isCompanyVehicle(category: string | undefined) {
 
 export function isMeetingRoom(category: string | undefined) {
   return category === "MEETING_ROOMS";
+}
+
+export function isPersonLocationCategory(category: string | undefined) {
+  return category === "MEETING_ROOMS" || category === "SHARED_WORKSPACES";
 }
 
 export function canBookMeetingRoom(

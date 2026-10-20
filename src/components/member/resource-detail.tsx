@@ -1,11 +1,11 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { bookingNeedsApproval, categoryLabel, isCompanyVehicle, maxBookingDurationMs, subcategoryLabel } from "@/lib/resource-catalog";
+import { VEHICLE_MIN_LEAD_MS, bookingNeedsApproval, categoryLabel, isCompanyVehicle, maxBookingDurationMs, subcategoryLabel } from "@/lib/resource-catalog";
 import { minimumPartySize } from "@/lib/reservation-participants";
 import { AvailabilityPill, ConfirmStat, DetailRow, FormField, ParticipantFields, StatusBadge, StepMark } from "./widgets";
 import { BoxIcon, CalendarGlyph, ClockGlyph, GalleryFrame, NoteIcon, PeopleIcon, PinIcon } from "./icons";
-import { addMonths, bookingWindowNote, combineLocal, dayLoad, detailMonthDays, endsLaterDay, formatClockLabel, formatDuration, formatEndChoice, formatHourDuration, inputClass, isResourceFree, monthStart, openEndChoices, openStartChoices, reservationSchedule, resourceBlurb, resourceFacilities, resourceGallery, startOfDay, toDateInput, type Availability, type ParticipantDraft, type Reservation, type Resource, type UserDashboardData } from "./model";
+import { addDays, addMonths, bookingWindowNote, combineLocal, dayLoad, detailMonthDays, endsLaterDay, formatClockLabel, formatDuration, formatEndChoice, formatHourDuration, inputClass, isResourceFree, monthStart, openEndChoices, openStartChoices, reservationSchedule, resourceBlurb, resourceFacilities, resourceGallery, startOfDay, toDateInput, type Availability, type ParticipantDraft, type Reservation, type Resource, type UserDashboardData } from "./model";
 
 export function ResourceDetailView({
   resource,
@@ -21,6 +21,7 @@ export function ResourceDetailView({
   participants,
   notifyParticipants,
   saving,
+  bookingError,
   photoIndex,
   todayInput,
   latestInput,
@@ -52,6 +53,7 @@ export function ResourceDetailView({
   participants: ParticipantDraft[];
   notifyParticipants: boolean;
   saving: boolean;
+  bookingError: string;
   photoIndex: number;
   todayInput: string;
   latestInput: string;
@@ -117,7 +119,14 @@ export function ResourceDetailView({
       : bookingWindowNote(date, startClock, endOptions, durationLimit);
   const selectedDay = date ? combineLocal(date, "12:00") : new Date();
   const [month, setMonth] = useState(() => monthStart(selectedDay));
-  const earliest = startOfDay(combineLocal(todayInput, "12:00"));
+  const earliest = isCompanyVehicle(resource.category)
+    ? startOfDay(
+        addDays(
+          combineLocal(todayInput, "12:00"),
+          VEHICLE_MIN_LEAD_MS / (24 * 60 * 60 * 1000)
+        )
+      )
+    : startOfDay(combineLocal(todayInput, "12:00"));
   const latest = startOfDay(combineLocal(latestInput, "12:00"));
   const days = detailMonthDays(month);
 
@@ -404,7 +413,7 @@ export function ResourceDetailView({
                 </h3>
                 <p className="mt-2 text-xs leading-5 text-slate-500">
                   {vehicle
-                    ? "A vehicle trip lasts at least 15 minutes and at most 36 hours, and it must finish before the next reservation. An administrator must approve it."
+                    ? "A vehicle trip can be booked at least 1 week in advance. It lasts at least 15 minutes and at most 36 hours, and it must finish before the next reservation. An administrator must approve it."
                     : "A booking lasts at least 15 minutes and at most 12 hours, and it must finish before the next reservation."}
                 </p>
                 <div className="mt-4 grid grid-cols-2 gap-3">
@@ -555,6 +564,14 @@ export function ResourceDetailView({
                       ? "Request approval"
                       : "Book Now"}
                 </button>
+                {bookingError && (
+                  <p
+                    role="alert"
+                    className="mt-3 text-sm leading-5 text-red-700"
+                  >
+                    {bookingError}
+                  </p>
+                )}
               </div>
           </div>
         </form>
@@ -633,4 +650,3 @@ export function ReservationReadonly({
     </section>
   );
 }
-

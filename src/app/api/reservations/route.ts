@@ -11,11 +11,13 @@ import { requireAuth } from "@/lib/require-auth";
 import {
   MIN_BOOKING_MS,
   VEHICLE_MAX_BOOKING_MS,
+  VEHICLE_MIN_LEAD_MS,
   bookingDurationMessage,
   bookingNeedsApproval,
   canBookMeetingRoom,
   isCompanyVehicle,
   isMeetingRoom,
+  isPersonLocationCategory,
   maxBookingDurationMs,
 } from "@/lib/resource-catalog";
 import {
@@ -217,6 +219,16 @@ export async function POST(request: Request) {
           );
         }
 
+        if (
+          isCompanyVehicle(resource.category) &&
+          start.getTime() < Date.now() + VEHICLE_MIN_LEAD_MS
+        ) {
+          throw new ReservationRequestError(
+            "Company vehicles can only be booked at least 1 week in advance.",
+            400
+          );
+        }
+
         if (duration > maxBookingDurationMs(resource.category)) {
           throw new ReservationRequestError(
             bookingDurationMessage(resource.category),
@@ -253,6 +265,32 @@ export async function POST(request: Request) {
           );
         }
 
+        const participantEmails = participants.map((person) =>
+          person.email.trim().toLowerCase()
+        );
+        if (participantEmails.length > 0) {
+          const registeredParticipants = await tx.user.findMany({
+            where: {
+              email: { in: participantEmails },
+              isActive: true,
+            },
+            select: { email: true },
+          });
+          const registeredEmails = new Set(
+            registeredParticipants.map((person) => person.email.toLowerCase())
+          );
+          const missingParticipant = participants.find(
+            (person) => !registeredEmails.has(person.email)
+          );
+
+          if (missingParticipant) {
+            throw new ReservationRequestError(
+              `${missingParticipant.email} is not a registered active user. Add a person who has an account in the system.`,
+              400
+            );
+          }
+        }
+
         try {
           assertParticipantCapacity(
             resource.capacity,
@@ -265,6 +303,90 @@ export async function POST(request: Request) {
           }
 
           throw error;
+        }
+
+        const vehicleConflict = await tx.reservation.findFirst({
+          where: {
+            status: { in: ["CONFIRMED", "PENDING"] },
+            startTime: { lt: end },
+            endTime: { gt: start },
+            resource: { category: "COMPANY_VEHICLES" },
+          },
+          select: { id: true },
+        });
+
+        if (vehicleConflict || isCompanyVehicle(resource.category)) {
+          const anyReservationConflict = await tx.reservation.findFirst({
+            where: {
+              status: { in: ["CONFIRMED", "PENDING"] },
+              startTime: { lt: end },
+              endTime: { gt: start },
+            },
+            select: { id: true },
+          });
+
+          if (anyReservationConflict) {
+            throw new ReservationRequestError(
+              isCompanyVehicle(resource.category)
+                ? "A vehicle cannot be booked while another reservation exists during the selected time. Choose another date or time."
+                : "This time cannot be booked because a vehicle is reserved. Choose another date or time.",
+              409
+            );
+          }
+        }
+
+        if (isPersonLocationCategory(resource.category)) {
+          const peopleEmails = [
+            bookedUser.email.trim().toLowerCase(),
+            ...participants.map((person) => person.email),
+          ];
+          const personConflicts = await tx.reservation.findMany({
+            where: {
+              status: { in: ["CONFIRMED", "PENDING"] },
+              startTime: { lt: end },
+              endTime: { gt: start },
+              resource: {
+                category: { in: ["MEETING_ROOMS", "SHARED_WORKSPACES"] },
+              },
+              OR: [
+                { userId: bookedUser.id },
+                { user: { email: { in: peopleEmails } } },
+                { participants: { some: { email: { in: peopleEmails } } } },
+              ],
+            },
+            select: {
+              user: { select: { email: true } },
+              participants: { select: { email: true } },
+            },
+          });
+
+          if (personConflicts.length > 0) {
+            const unavailableEmails = new Set(
+              personConflicts.flatMap((conflict) => [
+                conflict.user.email.trim().toLowerCase(),
+                ...conflict.participants.map((person) =>
+                  person.email.trim().toLowerCase()
+                ),
+              ])
+            );
+            const unavailablePeople = [
+              { name: bookedUser.name, email: bookedUser.email },
+              ...participants,
+            ]
+              .filter((person) =>
+                unavailableEmails.has(person.email.trim().toLowerCase())
+              )
+              .map((person) => person.name);
+
+            throw new ReservationRequestError(
+              `${unavailablePeople.join(", ")} ${
+                unavailablePeople.length === 1 ? "is" : "are"
+              } already in another meeting during the selected time. Remove ${
+                unavailablePeople.length === 1 ? "this person" : "these people"
+              } and add someone else, or change the date or time.`,
+              409
+            );
+          }
         }
 
         const conflict = await tx.reservation.findFirst({

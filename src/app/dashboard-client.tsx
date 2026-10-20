@@ -6,7 +6,7 @@ import Link from "next/link";
 import { setLocalStorageValue, useLocalStorageValue } from "@/lib/use-local-storage-value";
 import ThemeToggle from "@/components/theme-toggle";
 import { jobPositionLabel } from "@/lib/job-position";
-import { RESOURCE_CATALOG, canBookMeetingRoom, categoryLabel, isMeetingRoom, maxBookingDurationMs, subcategoryLabel } from "@/lib/resource-catalog";
+import { RESOURCE_CATALOG, VEHICLE_MIN_LEAD_MS, canBookMeetingRoom, categoryLabel, isCompanyVehicle, isMeetingRoom, maxBookingDurationMs, subcategoryLabel } from "@/lib/resource-catalog";
 import { ParticipantInputError, assertParticipantCapacity, parseParticipants } from "@/lib/reservation-participants";
 import { ActivityRow, AvailabilityPill, EmptyState, FormField, HeartButton, Panel, ParticipantFields, QuickAction, ReservationStat, SummaryCard } from "@/components/member/widgets";
 import { BellIcon, BoltGlyph, CalendarGlyph, CategoryIcon, CheckGlyph, ChevronIcon, ClockGlyph, CrossGlyph, InfoGlyph, LayersGlyph, NavIcon, PeopleIcon, PinIcon, ResourcePhoto, ResourceVisual, SearchIcon, SearchMark, SharedResourcesArt, SortIcon, StarGlyph } from "@/components/member/icons";
@@ -457,6 +457,14 @@ export default function DashboardClient({
 
     if (!bookedResource) {
       setError("Choose a resource to book.");
+      return;
+    }
+
+    if (
+      isCompanyVehicle(bookedResource.category) &&
+      start.getTime() < Date.now() + VEHICLE_MIN_LEAD_MS
+    ) {
+      setError("Company vehicles can only be booked at least 1 week in advance.");
       return;
     }
 
@@ -951,7 +959,7 @@ export default function DashboardClient({
             ref={contentRef}
             className="min-h-0 flex-1 space-y-5 overflow-y-auto px-4 pb-6 pt-2 sm:px-6 sm:pb-8"
           >
-            {error && (
+            {error && !detailResource && !showBooking && (
               <div
                 role="alert"
                 className="flex items-start justify-between gap-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
@@ -1518,6 +1526,14 @@ export default function DashboardClient({
                     >
                       {saving ? "Booking..." : "Confirm booking"}
                     </button>
+                    {error && (
+                      <p
+                        role="alert"
+                        className="text-sm leading-5 text-red-700"
+                      >
+                        {error}
+                      </p>
+                    )}
                   </div>
                 </form>
               </div>
@@ -1768,6 +1784,7 @@ export default function DashboardClient({
                 participants={participants}
                 notifyParticipants={notifyParticipants}
                 saving={saving}
+                bookingError={error}
                 photoIndex={photoIndex}
                 todayInput={todayInput}
                 latestInput={latestInput}
@@ -1819,4 +1836,3 @@ export default function DashboardClient({
     </div>
   );
 }
-
