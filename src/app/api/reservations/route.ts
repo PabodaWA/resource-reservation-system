@@ -388,7 +388,7 @@ export async function POST(request: Request) {
             );
           }
         }
-
+//conflict check for the same resource and time range
         const conflict = await tx.reservation.findFirst({
           where: {
             resourceId,
